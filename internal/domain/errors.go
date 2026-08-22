@@ -14,4 +14,7 @@ var (
 
 	// ErrInvalidPlate indica que la patente desencriptada no cumple el formato argentino esperado.
 	ErrInvalidPlate = errors.New("domain: formato de patente inválido")
+
+	// ErrInvalidCryptogram indica que pat_enc no pudo desencriptarse (formato o cifrado inválido).
+	ErrInvalidCryptogram = errors.New("domain: criptograma de patente inválido")
 )
