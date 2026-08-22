@@ -50,6 +50,15 @@ func Load() (*Config, error) {
 	if cfg.IdentityInternalURL == "" {
 		return nil, fmt.Errorf("config: IDENTITY_INTERNAL_URL es obligatoria")
 	}
+	if cfg.VehicleHPKEPrivateKey == "" {
+		return nil, fmt.Errorf("config: VEHICLE_HPKE_PRIVATE_KEY es obligatoria")
+	}
+	if cfg.PatAESKey == "" {
+		return nil, fmt.Errorf("config: PAT_AES_KEY es obligatoria")
+	}
+	if cfg.PatHMACSecret == "" {
+		return nil, fmt.Errorf("config: PAT_HMAC_SECRET es obligatoria")
+	}
 
 	return cfg, nil
 }
