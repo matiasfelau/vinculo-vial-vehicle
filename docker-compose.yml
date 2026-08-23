@@ -1,5 +1,5 @@
 services:
-  vehicle:
+  vinculo-vial-vehicle:
     build:
       context: .
       dockerfile: Dockerfile
@@ -37,3 +37,8 @@ services:
 
 volumes:
   vehicle-db-data:
+
+networks:
+  default:
+    name: vinculo-vial
+    external: true
