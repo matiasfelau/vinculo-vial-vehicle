@@ -1,5 +1,5 @@
 services:
-  vehicle:
+  vinculo-vial-vehicle:
     build:
       context: .
       dockerfile: Dockerfile
@@ -17,6 +17,9 @@ services:
       MOCK_DNRPA_OWNER_DNI: ${MOCK_DNRPA_OWNER_DNI}
       INTERNAL_SERVICE_TOKEN: ${INTERNAL_SERVICE_TOKEN}
       EPHEMERAL_DB: ${EPHEMERAL_DB:-false}
+    networks:
+      - vinculo-vial
+      - internal
     depends_on:
       vehicle-db:
         condition: service_healthy
@@ -29,6 +32,8 @@ services:
       POSTGRES_DB: vehicle
     volumes:
       - vehicle-db-data:/var/lib/postgresql/data
+    networks:
+      - internal
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U vehicle -d vehicle"]
       interval: 5s
@@ -37,3 +42,8 @@ services:
 
 volumes:
   vehicle-db-data:
+
+networks:
+  vinculo-vial:
+    external: true
+  internal:
