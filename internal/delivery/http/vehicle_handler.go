@@ -2,7 +2,6 @@ package http
 
 import (
 	"context"
-	"encoding/base64"
 	"errors"
 	"net/http"
 
@@ -20,8 +19,7 @@ type registerVehicleUseCase interface {
 }
 
 type registerVehicleRequest struct {
-	DNIEnc string `json:"dni_enc" binding:"required"`
-	PatEnc string `json:"pat_enc" binding:"required"`
+	PayloadEnc string `json:"payload_enc" binding:"required"`
 }
 
 // RegisterVehicleHandler expone POST /api/v1/vehicles. Lee X-User-Id (inyectado por
@@ -40,16 +38,9 @@ func RegisterVehicleHandler(useCase registerVehicleUseCase) gin.HandlerFunc {
 			return
 		}
 
-		dniEnc, err := base64.StdEncoding.DecodeString(req.DNIEnc)
-		if err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "dni_enc con codificación inválida"})
-			return
-		}
-
 		input := vehicle.RegisterVehicleInput{
-			OwnerID: ownerID,
-			DNIEnc:  dniEnc,
-			PatEnc:  req.PatEnc,
+			OwnerID:    ownerID,
+			PayloadEnc: req.PayloadEnc,
 		}
 
 		if err := useCase.Register(c.Request.Context(), input); err != nil {
@@ -67,6 +58,8 @@ func writeRegisterVehicleError(c *gin.Context, err error) {
 		c.JSON(http.StatusForbidden, gin.H{"error": "el dni no corresponde al propietario de la sesión"})
 	case errors.Is(err, domain.ErrOwnershipUnavailable):
 		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "no se pudo verificar la propiedad del vehículo"})
+	case errors.Is(err, domain.ErrOwnerLookupUnavailable):
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "no se pudo consultar la titularidad del vehículo"})
 	case errors.Is(err, domain.ErrDuplicateVehicle):
 		c.JSON(http.StatusConflict, gin.H{"error": "el vehículo ya está vinculado a este propietario"})
 	case errors.Is(err, domain.ErrInvalidPlate), errors.Is(err, domain.ErrInvalidCryptogram):

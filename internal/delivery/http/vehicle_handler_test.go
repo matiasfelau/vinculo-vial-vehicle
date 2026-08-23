@@ -3,7 +3,6 @@ package http
 import (
 	"bytes"
 	"context"
-	"encoding/base64"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -45,10 +44,7 @@ func vehiclesRequest(t *testing.T, ownerID string, body any) *http.Request {
 }
 
 func cuerpoValido() registerVehicleRequest {
-	return registerVehicleRequest{
-		DNIEnc: base64.StdEncoding.EncodeToString([]byte("criptograma-dni")),
-		PatEnc: "criptograma-patente",
-	}
+	return registerVehicleRequest{PayloadEnc: "criptograma-payload"}
 }
 
 func TestRegisterVehicleSinXUserIdRetorna401(t *testing.T) {
@@ -86,30 +82,13 @@ func TestRegisterVehiclePayloadMalFormadoRetorna400(t *testing.T) {
 	router := NewRouter(useCase)
 
 	rec := httptest.NewRecorder()
-	router.ServeHTTP(rec, vehiclesRequest(t, uuid.NewString(), map[string]string{"dni_enc": ""}))
+	router.ServeHTTP(rec, vehiclesRequest(t, uuid.NewString(), map[string]string{"payload_enc": ""}))
 
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("esperaba 400, obtuvo %d", rec.Code)
 	}
 	if useCase.fueInvocado {
 		t.Fatal("no debía invocarse el caso de uso con payload mal formado")
-	}
-}
-
-func TestRegisterVehicleDNIEncConCodificacionInvalidaRetorna400(t *testing.T) {
-	gin.SetMode(gin.TestMode)
-	useCase := &fakeRegisterVehicleUseCase{}
-	router := NewRouter(useCase)
-
-	rec := httptest.NewRecorder()
-	body := registerVehicleRequest{DNIEnc: "no-es-base64!!", PatEnc: "criptograma-patente"}
-	router.ServeHTTP(rec, vehiclesRequest(t, uuid.NewString(), body))
-
-	if rec.Code != http.StatusBadRequest {
-		t.Fatalf("esperaba 400, obtuvo %d", rec.Code)
-	}
-	if useCase.fueInvocado {
-		t.Fatal("no debía invocarse el caso de uso con dni_enc mal codificado")
 	}
 }
 
@@ -128,6 +107,9 @@ func TestRegisterVehicleExitoRetorna201(t *testing.T) {
 	if useCase.receivedInput.OwnerID != ownerID {
 		t.Fatal("el owner_id extraído de X-User-Id no coincide con el enviado al caso de uso")
 	}
+	if useCase.receivedInput.PayloadEnc != "criptograma-payload" {
+		t.Fatal("el payload_enc recibido no coincide con el enviado al caso de uso")
+	}
 }
 
 func TestRegisterVehicleErroresDelCasoDeUso(t *testing.T) {
@@ -138,6 +120,7 @@ func TestRegisterVehicleErroresDelCasoDeUso(t *testing.T) {
 	}{
 		{"ownership mismatch", domain.ErrOwnershipMismatch, http.StatusForbidden},
 		{"identity inalcanzable", domain.ErrOwnershipUnavailable, http.StatusServiceUnavailable},
+		{"dnrpa inalcanzable", domain.ErrOwnerLookupUnavailable, http.StatusServiceUnavailable},
 		{"vehiculo duplicado", domain.ErrDuplicateVehicle, http.StatusConflict},
 		{"patente invalida", domain.ErrInvalidPlate, http.StatusBadRequest},
 		{"criptograma invalido", domain.ErrInvalidCryptogram, http.StatusBadRequest},

@@ -4,6 +4,7 @@ import (
 	"log"
 	"time"
 
+	"github.com/matiasfelau/vinculo-vial-vehicle/internal/client/dnrpa"
 	"github.com/matiasfelau/vinculo-vial-vehicle/internal/client/identity"
 	"github.com/matiasfelau/vinculo-vial-vehicle/internal/crypto/hpke"
 	"github.com/matiasfelau/vinculo-vial-vehicle/internal/crypto/symmetric"
@@ -19,15 +20,22 @@ func main() {
 		log.Fatalf("no se pudo cargar la configuración: %v", err)
 	}
 
-	plateDecryptor, err := hpke.NewDecryptor(cfg.VehicleHPKEPrivateKey)
+	payloadDecryptor, err := hpke.NewDecryptor(cfg.VehicleHPKEPrivateKey)
 	if err != nil {
 		log.Fatalf("no se pudo inicializar el desencriptador HPKE: %v", err)
+	}
+
+	dniEncryptor, err := hpke.NewEncryptor(cfg.IdentityHPKEPublicKey)
+	if err != nil {
+		log.Fatalf("no se pudo inicializar el cifrador HPKE hacia identity: %v", err)
 	}
 
 	plateCipher, err := symmetric.NewCipher(cfg.PatAESKey)
 	if err != nil {
 		log.Fatalf("no se pudo inicializar el cifrado at-rest: %v", err)
 	}
+
+	dnrpaClient := dnrpa.NewMockDNRPAAdapter([]byte(cfg.MockDNRPAOwnerDNI))
 
 	db, err := postgres.Connect(cfg.DatabaseURL)
 	if err != nil {
@@ -43,7 +51,9 @@ func main() {
 	registerVehicleService := vehicle.NewRegisterVehicleService(
 		repository,
 		identityClient,
-		plateDecryptor,
+		dnrpaClient,
+		payloadDecryptor,
+		dniEncryptor,
 		plateCipher,
 		[]byte(cfg.PatHMACSecret),
 	)
