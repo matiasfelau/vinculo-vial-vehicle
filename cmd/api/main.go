@@ -41,6 +41,12 @@ func main() {
 	if err != nil {
 		log.Fatalf("no se pudo conectar a la base de datos: %v", err)
 	}
+	if cfg.EphemeralDB {
+		log.Println("EPHEMERAL_DB=true: reiniciando el esquema para un despliegue efímero")
+		if err := postgres.ResetSchema(db); err != nil {
+			log.Fatalf("no se pudo reiniciar el esquema efímero: %v", err)
+		}
+	}
 	if err := postgres.AutoMigrate(db); err != nil {
 		log.Fatalf("no se pudo migrar el esquema: %v", err)
 	}

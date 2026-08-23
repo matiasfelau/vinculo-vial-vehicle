@@ -16,6 +16,7 @@ services:
       IDENTITY_HPKE_PUBLIC_KEY: ${IDENTITY_HPKE_PUBLIC_KEY}
       MOCK_DNRPA_OWNER_DNI: ${MOCK_DNRPA_OWNER_DNI}
       INTERNAL_SERVICE_TOKEN: ${INTERNAL_SERVICE_TOKEN}
+      EPHEMERAL_DB: ${EPHEMERAL_DB:-false}
     depends_on:
       vehicle-db:
         condition: service_healthy
