@@ -16,6 +16,8 @@ type Config struct {
 	PatHMACSecret         string
 	IdentityInternalURL   string
 	IdentityTimeoutMS     int
+	IdentityHPKEPublicKey string
+	MockDNRPAOwnerDNI     string
 }
 
 // Load construye la configuración a partir de las variables de entorno del proceso.
@@ -28,6 +30,8 @@ func Load() (*Config, error) {
 		PatAESKey:             os.Getenv("PAT_AES_KEY"),
 		PatHMACSecret:         os.Getenv("PAT_HMAC_SECRET"),
 		IdentityInternalURL:   os.Getenv("IDENTITY_INTERNAL_URL"),
+		IdentityHPKEPublicKey: os.Getenv("IDENTITY_HPKE_PUBLIC_KEY"),
+		MockDNRPAOwnerDNI:     os.Getenv("MOCK_DNRPA_OWNER_DNI"),
 	}
 
 	if cfg.Port == "" {
@@ -49,6 +53,21 @@ func Load() (*Config, error) {
 	}
 	if cfg.IdentityInternalURL == "" {
 		return nil, fmt.Errorf("config: IDENTITY_INTERNAL_URL es obligatoria")
+	}
+	if cfg.VehicleHPKEPrivateKey == "" {
+		return nil, fmt.Errorf("config: VEHICLE_HPKE_PRIVATE_KEY es obligatoria")
+	}
+	if cfg.PatAESKey == "" {
+		return nil, fmt.Errorf("config: PAT_AES_KEY es obligatoria")
+	}
+	if cfg.PatHMACSecret == "" {
+		return nil, fmt.Errorf("config: PAT_HMAC_SECRET es obligatoria")
+	}
+	if cfg.IdentityHPKEPublicKey == "" {
+		return nil, fmt.Errorf("config: IDENTITY_HPKE_PUBLIC_KEY es obligatoria")
+	}
+	if cfg.MockDNRPAOwnerDNI == "" {
+		return nil, fmt.Errorf("config: MOCK_DNRPA_OWNER_DNI es obligatoria")
 	}
 
 	return cfg, nil
