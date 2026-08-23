@@ -7,7 +7,8 @@ import (
 )
 
 // OwnershipVerifier define la verificación de propiedad contra Identity.
-// El criptograma dniEnc se reenvía sin abrir: este servicio no posee la clave para desencriptarlo.
+// dniEnc es el DNI obtenido del DNRPA, cifrado por este servicio con la clave
+// pública HPKE de Identity antes de esta llamada.
 type OwnershipVerifier interface {
 	VerifyOwnership(ctx context.Context, ownerID uuid.UUID, dniEnc []byte) (bool, error)
 }

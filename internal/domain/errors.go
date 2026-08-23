@@ -15,6 +15,9 @@ var (
 	// ErrInvalidPlate indica que la patente desencriptada no cumple el formato argentino esperado.
 	ErrInvalidPlate = errors.New("domain: formato de patente inválido")
 
-	// ErrInvalidCryptogram indica que pat_enc no pudo desencriptarse (formato o cifrado inválido).
+	// ErrInvalidCryptogram indica que payload_enc no pudo desencriptarse o no tiene el formato esperado.
 	ErrInvalidCryptogram = errors.New("domain: criptograma de patente inválido")
+
+	// ErrOwnerLookupUnavailable indica que no pudo consultarse la titularidad contra el DNRPA.
+	ErrOwnerLookupUnavailable = errors.New("domain: no se pudo consultar la titularidad del vehículo")
 )
