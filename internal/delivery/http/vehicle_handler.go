@@ -3,6 +3,7 @@ package http
 import (
 	"context"
 	"errors"
+	"log"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
@@ -26,14 +27,17 @@ type registerVehicleRequest struct {
 // Kong) como owner_id; nunca confía en un X-User-Id que no provenga del gateway.
 func RegisterVehicleHandler(useCase registerVehicleUseCase) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		ownerID, err := uuid.Parse(c.GetHeader("X-User-Id"))
+		rawUserID := c.GetHeader("X-User-Id")
+		ownerID, err := uuid.Parse(rawUserID)
 		if err != nil {
+			log.Printf("POST /api/v1/vehicles: X-User-Id ausente o inválido (%q): %v", rawUserID, err)
 			c.JSON(http.StatusUnauthorized, gin.H{"error": "encabezado X-User-Id ausente o inválido"})
 			return
 		}
 
 		var req registerVehicleRequest
 		if err := c.ShouldBindJSON(&req); err != nil {
+			log.Printf("POST /api/v1/vehicles: payload mal formado: %v", err)
 			c.JSON(http.StatusBadRequest, gin.H{"error": "payload mal formado"})
 			return
 		}
@@ -53,6 +57,8 @@ func RegisterVehicleHandler(useCase registerVehicleUseCase) gin.HandlerFunc {
 }
 
 func writeRegisterVehicleError(c *gin.Context, err error) {
+	log.Printf("POST /api/v1/vehicles: rechazado por el caso de uso: %v", err)
+
 	switch {
 	case errors.Is(err, domain.ErrOwnershipMismatch):
 		c.JSON(http.StatusForbidden, gin.H{"error": "el dni no corresponde al propietario de la sesión"})

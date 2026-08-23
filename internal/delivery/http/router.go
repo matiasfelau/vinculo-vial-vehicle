@@ -10,6 +10,7 @@ import (
 // NewRouter construye el motor Gin con las rutas del servicio registradas.
 func NewRouter(registrar registerVehicleUseCase) *gin.Engine {
 	engine := gin.New()
+	engine.Use(gin.Logger())
 	engine.Use(gin.Recovery())
 
 	engine.GET("/health", healthCheck)
