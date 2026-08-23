@@ -46,7 +46,7 @@ func main() {
 	}
 	repository := postgres.NewVehicleRepository(db)
 
-	identityClient := identity.NewClient(cfg.IdentityInternalURL, time.Duration(cfg.IdentityTimeoutMS)*time.Millisecond)
+	identityClient := identity.NewClient(cfg.IdentityInternalURL, cfg.InternalServiceToken, time.Duration(cfg.IdentityTimeoutMS)*time.Millisecond)
 
 	registerVehicleService := vehicle.NewRegisterVehicleService(
 		repository,

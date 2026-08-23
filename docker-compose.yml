@@ -15,6 +15,7 @@ services:
       IDENTITY_TIMEOUT_MS: ${IDENTITY_TIMEOUT_MS:-2000}
       IDENTITY_HPKE_PUBLIC_KEY: ${IDENTITY_HPKE_PUBLIC_KEY}
       MOCK_DNRPA_OWNER_DNI: ${MOCK_DNRPA_OWNER_DNI}
+      INTERNAL_SERVICE_TOKEN: ${INTERNAL_SERVICE_TOKEN}
     depends_on:
       vehicle-db:
         condition: service_healthy

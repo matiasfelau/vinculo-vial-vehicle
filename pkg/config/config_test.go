@@ -13,6 +13,7 @@ func setEnvCompleto(t *testing.T) {
 		"PAT_HMAC_SECRET":          "clave-de-prueba",
 		"IDENTITY_HPKE_PUBLIC_KEY": "clave-de-prueba",
 		"MOCK_DNRPA_OWNER_DNI":     "12345678",
+		"INTERNAL_SERVICE_TOKEN":   "token-de-prueba",
 	}
 
 	for k, v := range vars {
@@ -44,6 +45,7 @@ func TestLoadFallaSinVariablesObligatorias(t *testing.T) {
 		"PAT_HMAC_SECRET",
 		"IDENTITY_HPKE_PUBLIC_KEY",
 		"MOCK_DNRPA_OWNER_DNI",
+		"INTERNAL_SERVICE_TOKEN",
 	}
 
 	for _, faltante := range obligatorias {

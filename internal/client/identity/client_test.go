@@ -30,13 +30,16 @@ func TestVerifyOwnershipMatchTrue(t *testing.T) {
 		if got.DNIEnc != base64.StdEncoding.EncodeToString(dniEnc) {
 			t.Errorf("dni_enc no coincide con el criptograma reenviado sin abrir")
 		}
+		if got := r.Header.Get("X-Internal-Service-Token"); got != "token-de-prueba" {
+			t.Errorf("X-Internal-Service-Token esperado %q, obtuvo %q", "token-de-prueba", got)
+		}
 
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(verifyOwnershipResponse{Match: true})
 	}))
 	defer server.Close()
 
-	client := NewClient(server.URL, time.Second)
+	client := NewClient(server.URL, "token-de-prueba", time.Second)
 
 	match, err := client.VerifyOwnership(context.Background(), ownerID, dniEnc)
 	if err != nil {
@@ -54,7 +57,7 @@ func TestVerifyOwnershipMatchFalse(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client := NewClient(server.URL, time.Second)
+	client := NewClient(server.URL, "token-de-prueba", time.Second)
 
 	match, err := client.VerifyOwnership(context.Background(), uuid.New(), []byte("criptograma-dni"))
 	if err != nil {
@@ -73,7 +76,7 @@ func TestVerifyOwnershipTimeout(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client := NewClient(server.URL, 5*time.Millisecond)
+	client := NewClient(server.URL, "token-de-prueba", 5*time.Millisecond)
 
 	_, err := client.VerifyOwnership(context.Background(), uuid.New(), []byte("criptograma-dni"))
 	if !errors.Is(err, domain.ErrOwnershipUnavailable) {
@@ -87,7 +90,7 @@ func TestVerifyOwnershipEstadoInesperado(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client := NewClient(server.URL, time.Second)
+	client := NewClient(server.URL, "token-de-prueba", time.Second)
 
 	_, err := client.VerifyOwnership(context.Background(), uuid.New(), []byte("criptograma-dni"))
 	if !errors.Is(err, domain.ErrOwnershipUnavailable) {
@@ -102,7 +105,7 @@ func TestVerifyOwnershipRespuestaMalformada(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client := NewClient(server.URL, time.Second)
+	client := NewClient(server.URL, "token-de-prueba", time.Second)
 
 	_, err := client.VerifyOwnership(context.Background(), uuid.New(), []byte("criptograma-dni"))
 	if !errors.Is(err, domain.ErrOwnershipUnavailable) {
@@ -114,7 +117,7 @@ func TestVerifyOwnershipServidorInalcanzable(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
 	server.Close()
 
-	client := NewClient(server.URL, time.Second)
+	client := NewClient(server.URL, "token-de-prueba", time.Second)
 
 	_, err := client.VerifyOwnership(context.Background(), uuid.New(), []byte("criptograma-dni"))
 	if !errors.Is(err, domain.ErrOwnershipUnavailable) {
