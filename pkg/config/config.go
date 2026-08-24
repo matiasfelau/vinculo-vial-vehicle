@@ -18,6 +18,8 @@ type Config struct {
 	IdentityTimeoutMS     int
 	IdentityHPKEPublicKey string
 	MockDNRPAOwnerDNI     string
+	InternalServiceToken  string
+	EphemeralDB           bool
 }
 
 // Load construye la configuración a partir de las variables de entorno del proceso.
@@ -32,6 +34,7 @@ func Load() (*Config, error) {
 		IdentityInternalURL:   os.Getenv("IDENTITY_INTERNAL_URL"),
 		IdentityHPKEPublicKey: os.Getenv("IDENTITY_HPKE_PUBLIC_KEY"),
 		MockDNRPAOwnerDNI:     os.Getenv("MOCK_DNRPA_OWNER_DNI"),
+		InternalServiceToken:  os.Getenv("INTERNAL_SERVICE_TOKEN"),
 	}
 
 	if cfg.Port == "" {
@@ -47,6 +50,16 @@ func Load() (*Config, error) {
 		return nil, fmt.Errorf("config: IDENTITY_TIMEOUT_MS inválido: %w", err)
 	}
 	cfg.IdentityTimeoutMS = timeoutMS
+
+	ephemeralDBRaw := os.Getenv("EPHEMERAL_DB")
+	if ephemeralDBRaw == "" {
+		ephemeralDBRaw = "false"
+	}
+	ephemeralDB, err := strconv.ParseBool(ephemeralDBRaw)
+	if err != nil {
+		return nil, fmt.Errorf("config: EPHEMERAL_DB inválido: %w", err)
+	}
+	cfg.EphemeralDB = ephemeralDB
 
 	if cfg.DatabaseURL == "" {
 		return nil, fmt.Errorf("config: DATABASE_URL es obligatoria")
@@ -68,6 +81,9 @@ func Load() (*Config, error) {
 	}
 	if cfg.MockDNRPAOwnerDNI == "" {
 		return nil, fmt.Errorf("config: MOCK_DNRPA_OWNER_DNI es obligatoria")
+	}
+	if cfg.InternalServiceToken == "" {
+		return nil, fmt.Errorf("config: INTERNAL_SERVICE_TOKEN es obligatoria")
 	}
 
 	return cfg, nil

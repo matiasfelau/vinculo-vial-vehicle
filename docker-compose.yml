@@ -1,10 +1,10 @@
 services:
-  vehicle:
+  vinculo-vial-vehicle:
     build:
       context: .
       dockerfile: Dockerfile
     ports:
-      - "${PORT:-8080}:8080"
+      - "${PORT:-8080}:${PORT:-8080}"
     environment:
       PORT: ${PORT:-8080}
       DATABASE_URL: postgres://vehicle:vehicle@vehicle-db:5432/vehicle?sslmode=disable
@@ -15,6 +15,11 @@ services:
       IDENTITY_TIMEOUT_MS: ${IDENTITY_TIMEOUT_MS:-2000}
       IDENTITY_HPKE_PUBLIC_KEY: ${IDENTITY_HPKE_PUBLIC_KEY}
       MOCK_DNRPA_OWNER_DNI: ${MOCK_DNRPA_OWNER_DNI}
+      INTERNAL_SERVICE_TOKEN: ${INTERNAL_SERVICE_TOKEN}
+      EPHEMERAL_DB: ${EPHEMERAL_DB:-false}
+    networks:
+      - vinculo-vial
+      - internal
     depends_on:
       vehicle-db:
         condition: service_healthy
@@ -27,6 +32,8 @@ services:
       POSTGRES_DB: vehicle
     volumes:
       - vehicle-db-data:/var/lib/postgresql/data
+    networks:
+      - internal
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U vehicle -d vehicle"]
       interval: 5s
@@ -35,3 +42,8 @@ services:
 
 volumes:
   vehicle-db-data:
+
+networks:
+  vinculo-vial:
+    external: true
+  internal:

@@ -13,6 +13,7 @@ func setEnvCompleto(t *testing.T) {
 		"PAT_HMAC_SECRET":          "clave-de-prueba",
 		"IDENTITY_HPKE_PUBLIC_KEY": "clave-de-prueba",
 		"MOCK_DNRPA_OWNER_DNI":     "12345678",
+		"INTERNAL_SERVICE_TOKEN":   "token-de-prueba",
 	}
 
 	for k, v := range vars {
@@ -33,6 +34,31 @@ func TestLoadConConfiguracionCompleta(t *testing.T) {
 	if cfg.IdentityTimeoutMS != 2000 {
 		t.Errorf("esperaba timeout por defecto 2000, obtuvo %d", cfg.IdentityTimeoutMS)
 	}
+	if cfg.EphemeralDB != false {
+		t.Errorf("esperaba EPHEMERAL_DB por defecto false, obtuvo %v", cfg.EphemeralDB)
+	}
+}
+
+func TestLoadEphemeralDBTrue(t *testing.T) {
+	setEnvCompleto(t)
+	t.Setenv("EPHEMERAL_DB", "true")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("no se esperaba error: %v", err)
+	}
+	if !cfg.EphemeralDB {
+		t.Error("esperaba EphemeralDB en true")
+	}
+}
+
+func TestLoadEphemeralDBInvalido(t *testing.T) {
+	setEnvCompleto(t)
+	t.Setenv("EPHEMERAL_DB", "no-es-un-booleano")
+
+	if _, err := Load(); err == nil {
+		t.Fatal("esperaba error con EPHEMERAL_DB inválido")
+	}
 }
 
 func TestLoadFallaSinVariablesObligatorias(t *testing.T) {
@@ -44,6 +70,7 @@ func TestLoadFallaSinVariablesObligatorias(t *testing.T) {
 		"PAT_HMAC_SECRET",
 		"IDENTITY_HPKE_PUBLIC_KEY",
 		"MOCK_DNRPA_OWNER_DNI",
+		"INTERNAL_SERVICE_TOKEN",
 	}
 
 	for _, faltante := range obligatorias {

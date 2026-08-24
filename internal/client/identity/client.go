@@ -21,13 +21,17 @@ import (
 // degradar en un alta sin verificar propiedad.
 type Client struct {
 	url        string
+	token      string
 	httpClient *http.Client
 }
 
 // NewClient construye el cliente con un timeout explícito para la llamada a Identity.
-func NewClient(url string, timeout time.Duration) *Client {
+// token se envía en cada solicitud como X-Internal-Service-Token, exigido por Identity
+// para autorizar el tráfico de servicio a servicio en la red interna (Zero-Trust).
+func NewClient(url string, token string, timeout time.Duration) *Client {
 	return &Client{
 		url:        url,
+		token:      token,
 		httpClient: &http.Client{Timeout: timeout},
 	}
 }
@@ -58,6 +62,7 @@ func (c *Client) VerifyOwnership(ctx context.Context, ownerID uuid.UUID, dniEnc 
 		return false, fmt.Errorf("%w: no se pudo construir la solicitud: %v", domain.ErrOwnershipUnavailable, err)
 	}
 	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-Internal-Service-Token", c.token)
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
