@@ -6,9 +6,12 @@ Identity antes de persistir la vinculación.
 
 ## Responsabilidades
 
-- Recibir el criptograma de la patente cifrado para este servicio (HPKE) y el criptograma
-  del DNI cifrado para Identity, reenviando este último sin abrirlo.
-- Verificar la propiedad del vehículo contra `vinculo-vial-identity` por red interna.
+- Recibir un único criptograma (`payload_enc`, HPKE) con los datos del vehículo
+  escaneados del QR (patente, chasis).
+- Consultar la titularidad del vehículo contra el registro automotor (DNRPA) a partir
+  de la patente, obteniendo el DNI del titular legal.
+- Cifrar ese DNI con la clave pública HPKE de Identity y verificar la propiedad contra
+  `vinculo-vial-identity` por red interna.
 - Desencriptar, validar, calcular el Blind Index y cifrar la patente en reposo.
 - Persistir la vinculación `(owner_id, patente)` respetando la regla de unicidad compuesta.
 
@@ -26,7 +29,8 @@ integran únicamente en las capas de infraestructura (`repository`, `delivery`, 
 /internal/repository/postgres  Persistencia (GORM/PostgreSQL)
 /internal/delivery/http     Handlers HTTP (Gin)
 /internal/client/identity   Cliente hacia el servicio Identity
-/internal/crypto/hpke       Desencriptación HPKE de la patente
+/internal/client/dnrpa      Adaptador (mock) de consulta al registro automotor
+/internal/crypto/hpke       Cifrado y desencriptación HPKE
 /internal/crypto/symmetric  Cifrado AES-256-GCM at-rest
 /internal/crypto/blindindex Cálculo del Blind Index (HMAC-SHA256)
 /internal/secure            Utilidades de Zero-Retention

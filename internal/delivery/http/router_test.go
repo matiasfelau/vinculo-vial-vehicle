@@ -10,7 +10,7 @@ import (
 
 func TestHealthCheck(t *testing.T) {
 	gin.SetMode(gin.TestMode)
-	router := NewRouter()
+	router := NewRouter(&fakeRegisterVehicleUseCase{})
 
 	req := httptest.NewRequest(http.MethodGet, "/health", nil)
 	rec := httptest.NewRecorder()
