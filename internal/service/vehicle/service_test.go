@@ -23,6 +23,14 @@ func (f *fakeRepository) Create(ctx context.Context, vehicle *domain.Vehicle) er
 	return f.createErr
 }
 
+func (f *fakeRepository) ExistsByPatHash(ctx context.Context, patHashed string) (bool, error) {
+	return false, nil
+}
+
+func (f *fakeRepository) FindOwnersByPatHash(ctx context.Context, patHashed string) ([]uuid.UUID, error) {
+	return nil, nil
+}
+
 type fakeOwnershipVerifier struct {
 	match       bool
 	err         error
