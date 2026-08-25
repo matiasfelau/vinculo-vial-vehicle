@@ -37,6 +37,19 @@ func TestLoadConConfiguracionCompleta(t *testing.T) {
 	if cfg.EphemeralDB != false {
 		t.Errorf("esperaba EPHEMERAL_DB por defecto false, obtuvo %v", cfg.EphemeralDB)
 	}
+	if cfg.InternalPort != "8081" {
+		t.Errorf("esperaba puerto interno por defecto 8081, obtuvo %q", cfg.InternalPort)
+	}
+}
+
+func TestLoadInternalPortIgualAPortRetornaError(t *testing.T) {
+	setEnvCompleto(t)
+	t.Setenv("PORT", "9000")
+	t.Setenv("INTERNAL_PORT", "9000")
+
+	if _, err := Load(); err == nil {
+		t.Fatal("esperaba error cuando INTERNAL_PORT coincide con PORT")
+	}
 }
 
 func TestLoadEphemeralDBTrue(t *testing.T) {
