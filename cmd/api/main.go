@@ -10,6 +10,7 @@ import (
 	"github.com/matiasfelau/vinculo-vial-vehicle/internal/crypto/symmetric"
 	httpdelivery "github.com/matiasfelau/vinculo-vial-vehicle/internal/delivery/http"
 	"github.com/matiasfelau/vinculo-vial-vehicle/internal/repository/postgres"
+	"github.com/matiasfelau/vinculo-vial-vehicle/internal/service/lookup"
 	"github.com/matiasfelau/vinculo-vial-vehicle/internal/service/vehicle"
 	"github.com/matiasfelau/vinculo-vial-vehicle/pkg/config"
 )
@@ -64,7 +65,9 @@ func main() {
 		[]byte(cfg.PatHMACSecret),
 	)
 
-	router := httpdelivery.NewRouter(registerVehicleService)
+	checkVehicleService := lookup.NewCheckVehicleService(repository, payloadDecryptor, []byte(cfg.PatHMACSecret))
+
+	router := httpdelivery.NewRouter(registerVehicleService, checkVehicleService)
 	internalRouter := httpdelivery.NewInternalRouter(cfg.InternalServiceToken)
 
 	errCh := make(chan error, 2)
