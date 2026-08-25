@@ -12,7 +12,7 @@ const secretoDePrueba = "un-secreto-de-servicio-bien-largo"
 
 func TestInternalHealthzSinTokenDevuelve401(t *testing.T) {
 	gin.SetMode(gin.TestMode)
-	router := NewInternalRouter(secretoDePrueba)
+	router := NewInternalRouter(secretoDePrueba, &fakeResolveOwnersUseCase{})
 
 	req := httptest.NewRequest(http.MethodGet, "/internal/healthz", nil)
 	rec := httptest.NewRecorder()
@@ -25,7 +25,7 @@ func TestInternalHealthzSinTokenDevuelve401(t *testing.T) {
 
 func TestInternalHealthzConTokenIncorrectoDevuelve401(t *testing.T) {
 	gin.SetMode(gin.TestMode)
-	router := NewInternalRouter(secretoDePrueba)
+	router := NewInternalRouter(secretoDePrueba, &fakeResolveOwnersUseCase{})
 
 	req := httptest.NewRequest(http.MethodGet, "/internal/healthz", nil)
 	req.Header.Set(HeaderInternalServiceToken, "esto-no-es-el-secreto")
@@ -39,7 +39,7 @@ func TestInternalHealthzConTokenIncorrectoDevuelve401(t *testing.T) {
 
 func TestInternalHealthzConTokenCorrectoDevuelve200(t *testing.T) {
 	gin.SetMode(gin.TestMode)
-	router := NewInternalRouter(secretoDePrueba)
+	router := NewInternalRouter(secretoDePrueba, &fakeResolveOwnersUseCase{})
 
 	req := httptest.NewRequest(http.MethodGet, "/internal/healthz", nil)
 	req.Header.Set(HeaderInternalServiceToken, secretoDePrueba)
@@ -56,7 +56,7 @@ func TestInternalHealthzConTokenCorrectoDevuelve200(t *testing.T) {
 // lo mismo.
 func TestInternalRouterDevuelve401AntesDeRevelarSiLaRutaExiste(t *testing.T) {
 	gin.SetMode(gin.TestMode)
-	router := NewInternalRouter(secretoDePrueba)
+	router := NewInternalRouter(secretoDePrueba, &fakeResolveOwnersUseCase{})
 
 	req := httptest.NewRequest(http.MethodPost, "/internal/una-ruta-que-no-existe", nil)
 	rec := httptest.NewRecorder()
@@ -72,7 +72,7 @@ func TestInternalRouterDevuelve401AntesDeRevelarSiLaRutaExiste(t *testing.T) {
 // siquiera con el secreto de servicio correcto.
 func TestInternalRouterNoExponeLasRutasPublicas(t *testing.T) {
 	gin.SetMode(gin.TestMode)
-	router := NewInternalRouter(secretoDePrueba)
+	router := NewInternalRouter(secretoDePrueba, &fakeResolveOwnersUseCase{})
 
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/vehicles", nil)
 	req.Header.Set(HeaderInternalServiceToken, secretoDePrueba)

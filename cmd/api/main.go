@@ -66,9 +66,10 @@ func main() {
 	)
 
 	checkVehicleService := lookup.NewCheckVehicleService(repository, payloadDecryptor, []byte(cfg.PatHMACSecret))
+	resolveOwnersService := lookup.NewResolveOwnersService(repository, payloadDecryptor, []byte(cfg.PatHMACSecret))
 
 	router := httpdelivery.NewRouter(registerVehicleService, checkVehicleService)
-	internalRouter := httpdelivery.NewInternalRouter(cfg.InternalServiceToken)
+	internalRouter := httpdelivery.NewInternalRouter(cfg.InternalServiceToken, resolveOwnersService)
 
 	errCh := make(chan error, 2)
 	go func() {

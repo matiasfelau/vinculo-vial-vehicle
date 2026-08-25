@@ -22,7 +22,7 @@ const HeaderInternalServiceToken = "X-Internal-Service-Token"
 // cualquier contenedor alcanza cualquier puerto de otro—, así que
 // requireServiceToken exige además, en toda petición, el secreto de servicio
 // como segunda capa de la defensa en profundidad.
-func NewInternalRouter(serviceToken string) *gin.Engine {
+func NewInternalRouter(serviceToken string, resolver resolveOwnersUseCase) *gin.Engine {
 	engine := gin.New()
 	engine.Use(gin.Logger())
 	engine.Use(gin.Recovery())
@@ -31,6 +31,7 @@ func NewInternalRouter(serviceToken string) *gin.Engine {
 	engine.GET("/internal/healthz", func(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{"status": "ok"})
 	})
+	engine.POST("/internal/resolve-owner", ResolveOwnerHandler(resolver))
 
 	return engine
 }
