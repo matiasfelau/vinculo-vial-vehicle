@@ -65,9 +65,19 @@ func main() {
 	)
 
 	router := httpdelivery.NewRouter(registerVehicleService)
+	internalRouter := httpdelivery.NewInternalRouter(cfg.InternalServiceToken)
 
-	log.Printf("vehicle service escuchando en el puerto %s", cfg.Port)
-	if err := router.Run(":" + cfg.Port); err != nil {
+	errCh := make(chan error, 2)
+	go func() {
+		log.Printf("vehicle service (público) escuchando en el puerto %s", cfg.Port)
+		errCh <- router.Run(":" + cfg.Port)
+	}()
+	go func() {
+		log.Printf("vehicle service (interno) escuchando en el puerto %s", cfg.InternalPort)
+		errCh <- internalRouter.Run(":" + cfg.InternalPort)
+	}()
+
+	if err := <-errCh; err != nil {
 		log.Fatalf("error al iniciar el servidor HTTP: %v", err)
 	}
 }
