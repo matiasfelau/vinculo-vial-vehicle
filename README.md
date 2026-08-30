@@ -50,3 +50,23 @@ go test ./...
 CGO_ENABLED=0 go build -o vehicle ./cmd/api
 docker compose up --build
 ```
+
+## Nomenclatura de infraestructura Docker
+
+`docker-compose.yml` fija explícitamente los nombres de contenedor, red y volumen para
+garantizar resolución DNS consistente entre microservicios sobre la red compartida de la
+plataforma:
+
+- **Contenedor principal**: `vinculo-vial-vehicle`, fijado con `container_name`. Es el
+  único nombre que otros microservicios necesitan resolver.
+- **Contenedor secundario (base de datos)**: `vinculo-vial-vehicle-db`.
+- **Red compartida**: `vinculo-vial`, externa (`external: true`); la crea el ecosistema,
+  no este compose. Solo el contenedor principal se conecta acá.
+- **Red interna**: `vehicle-internal`, local a este servicio; aísla el tráfico hacia la
+  base de datos, que no debe ser alcanzable desde otros microservicios.
+- **Volumen persistente**: `vinculo-vial-vehicle-data`.
+
+Sin `container_name` explícito, Compose deriva el nombre del contenedor del directorio del
+proyecto más un sufijo numérico (`vinculo-vial-vehicle-vinculo-vial-vehicle-1`), que no
+coincide con el nombre que el resto de la plataforma espera resolver por DNS sobre la red
+compartida.

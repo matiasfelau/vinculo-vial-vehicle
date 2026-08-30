@@ -1,5 +1,6 @@
 services:
   vinculo-vial-vehicle:
+    container_name: vinculo-vial-vehicle
     build:
       context: .
       dockerfile: Dockerfile
@@ -11,8 +12,7 @@ services:
     # INTERNAL_SERVICE_TOKEN es la segunda capa de esa protección.
     environment:
       PORT: ${PORT:-8080}
-      INTERNAL_PORT: ${INTERNAL_PORT:-8081}
-      DATABASE_URL: postgres://vehicle:vehicle@vehicle-db:5432/vehicle?sslmode=disable
+      DATABASE_URL: postgres://vehicle:vehicle@vinculo-vial-vehicle-db:5432/vehicle?sslmode=disable
       VEHICLE_HPKE_PRIVATE_KEY: ${VEHICLE_HPKE_PRIVATE_KEY}
       PAT_AES_KEY: ${PAT_AES_KEY}
       PAT_HMAC_SECRET: ${PAT_HMAC_SECRET}
@@ -24,21 +24,22 @@ services:
       EPHEMERAL_DB: ${EPHEMERAL_DB:-false}
     networks:
       - vinculo-vial
-      - internal
+      - vehicle-internal
     depends_on:
-      vehicle-db:
+      vinculo-vial-vehicle-db:
         condition: service_healthy
 
-  vehicle-db:
+  vinculo-vial-vehicle-db:
+    container_name: vinculo-vial-vehicle-db
     image: postgres:16-alpine
     environment:
       POSTGRES_USER: vehicle
       POSTGRES_PASSWORD: vehicle
       POSTGRES_DB: vehicle
     volumes:
-      - vehicle-db-data:/var/lib/postgresql/data
+      - vinculo-vial-vehicle-data:/var/lib/postgresql/data
     networks:
-      - internal
+      - vehicle-internal
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U vehicle -d vehicle"]
       interval: 5s
@@ -46,9 +47,20 @@ services:
       retries: 5
 
 volumes:
-  vehicle-db-data:
+  # Nombre fijado explícitamente: sin `name`, Compose antepone el nombre del
+  # proyecto (el propio directorio) y duplicaría el prefijo vinculo-vial-vehicle.
+  vinculo-vial-vehicle-data:
+    name: vinculo-vial-vehicle-data
 
 networks:
+  # Red puente compartida por toda la plataforma. Es externa: la crea el
+  # ecosistema (o el propio operador con `docker network create vinculo-vial`),
+  # no este compose. Solo el servicio principal se conecta acá: es la única
+  # superficie que otros microservicios deben poder resolver por DNS.
   vinculo-vial:
     external: true
-  internal:
+  # Red local exclusiva de este servicio: aísla el tráfico hacia su base de
+  # datos, que no debe ser alcanzable desde otros microservicios ni desde la
+  # red compartida.
+  vehicle-internal:
+    name: vehicle-internal
