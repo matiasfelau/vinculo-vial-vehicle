@@ -6,6 +6,10 @@ services:
       dockerfile: Dockerfile
     ports:
       - "${PORT:-8080}:${PORT:-8080}"
+    # Deliberadamente sin publicar INTERNAL_PORT: las rutas /internal/* (US-05)
+    # no se exponen fuera de la red interna. Alert las alcanza igual dentro de
+    # la red `vinculo-vial`, sin necesidad de un `ports:` acá. El secreto
+    # INTERNAL_SERVICE_TOKEN es la segunda capa de esa protección.
     environment:
       PORT: ${PORT:-8080}
       DATABASE_URL: postgres://vehicle:vehicle@vinculo-vial-vehicle-db:5432/vehicle?sslmode=disable

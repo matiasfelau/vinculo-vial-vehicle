@@ -92,3 +92,82 @@ func TestCreateDistintoPropietarioMismaPatenteSePermite(t *testing.T) {
 		t.Fatalf("esperaba poder vincular la misma patente a otro propietario, obtuvo error: %v", err)
 	}
 }
+
+func TestExistsByPatHashPatenteExistenteRetornaTrue(t *testing.T) {
+	db := setupTestDB(t)
+	repo := NewVehicleRepository(db)
+
+	patHashed := uuid.NewString()
+	vehicle := &domain.Vehicle{ID: uuid.New(), OwnerID: uuid.New(), PatHashed: patHashed, PatAES: "cifrado", CreatedAt: time.Now()}
+	if err := repo.Create(context.Background(), vehicle); err != nil {
+		t.Fatalf("no se pudo crear el vehículo: %v", err)
+	}
+
+	exists, err := repo.ExistsByPatHash(context.Background(), patHashed)
+	if err != nil {
+		t.Fatalf("no se esperaba error: %v", err)
+	}
+	if !exists {
+		t.Fatal("esperaba true para una patente vinculada")
+	}
+}
+
+func TestExistsByPatHashPatenteInexistenteRetornaFalse(t *testing.T) {
+	db := setupTestDB(t)
+	repo := NewVehicleRepository(db)
+
+	exists, err := repo.ExistsByPatHash(context.Background(), uuid.NewString())
+	if err != nil {
+		t.Fatalf("no se esperaba error: %v", err)
+	}
+	if exists {
+		t.Fatal("esperaba false para una patente no vinculada")
+	}
+}
+
+func TestFindOwnersByPatHashRetornaLosTresDuenos(t *testing.T) {
+	db := setupTestDB(t)
+	repo := NewVehicleRepository(db)
+
+	patHashed := uuid.NewString()
+	esperados := make(map[uuid.UUID]bool)
+	for i := 0; i < 3; i++ {
+		ownerID := uuid.New()
+		esperados[ownerID] = true
+
+		vehicle := &domain.Vehicle{ID: uuid.New(), OwnerID: ownerID, PatHashed: patHashed, PatAES: "cifrado", CreatedAt: time.Now()}
+		if err := repo.Create(context.Background(), vehicle); err != nil {
+			t.Fatalf("no se pudo crear el vehículo %d: %v", i, err)
+		}
+	}
+
+	owners, err := repo.FindOwnersByPatHash(context.Background(), patHashed)
+	if err != nil {
+		t.Fatalf("no se esperaba error: %v", err)
+	}
+	if len(owners) != 3 {
+		t.Fatalf("esperaba 3 dueños, obtuvo %d", len(owners))
+	}
+	for _, ownerID := range owners {
+		if !esperados[ownerID] {
+			t.Fatalf("owner_id inesperado en el resultado: %v", ownerID)
+		}
+		delete(esperados, ownerID)
+	}
+	if len(esperados) != 0 {
+		t.Fatalf("faltaron owner_id en el resultado: %v", esperados)
+	}
+}
+
+func TestFindOwnersByPatHashPatenteInexistenteRetornaVacioSinError(t *testing.T) {
+	db := setupTestDB(t)
+	repo := NewVehicleRepository(db)
+
+	owners, err := repo.FindOwnersByPatHash(context.Background(), uuid.NewString())
+	if err != nil {
+		t.Fatalf("no se esperaba error: %v", err)
+	}
+	if len(owners) != 0 {
+		t.Fatalf("esperaba un slice vacío, obtuvo %d elementos", len(owners))
+	}
+}
