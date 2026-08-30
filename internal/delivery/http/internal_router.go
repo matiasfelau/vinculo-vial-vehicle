@@ -2,6 +2,7 @@ package http
 
 import (
 	"crypto/subtle"
+	"log"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
@@ -26,6 +27,7 @@ func NewInternalRouter(serviceToken string, resolver resolveOwnersUseCase) *gin.
 	engine := gin.New()
 	engine.Use(gin.Logger())
 	engine.Use(gin.Recovery())
+	engine.Use(logInternalRequest())
 	engine.Use(requireServiceToken(serviceToken))
 
 	engine.GET("/internal/healthz", func(c *gin.Context) {
@@ -34,6 +36,19 @@ func NewInternalRouter(serviceToken string, resolver resolveOwnersUseCase) *gin.
 	engine.POST("/internal/resolve-owner", ResolveOwnerHandler(resolver))
 
 	return engine
+}
+
+// logInternalRequest registra la llegada de toda petición al router interno,
+// antes de cualquier otra validación (incluida requireServiceToken). Permite
+// distinguir, ante un reclamo de un consumidor (p. ej. Alert) de que sus
+// peticiones "mueren en el camino", si la petición efectivamente llegó a
+// este proceso (problema de aplicación o de token) o si nunca llegó
+// (problema de red, DNS o binding de puerto): esto último no deja rastro acá.
+func logInternalRequest() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		log.Printf("internal: petición recibida %s %s desde %s", c.Request.Method, c.Request.URL.Path, c.Request.RemoteAddr)
+		c.Next()
+	}
 }
 
 // requireServiceToken exige, en toda petición, el secreto de servicio a
