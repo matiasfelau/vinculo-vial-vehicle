@@ -77,7 +77,7 @@ func main() {
 		errCh <- router.Run(":" + cfg.Port)
 	}()
 	go func() {
-		log.Printf("vehicle service (interno) escuchando en el puerto %s", cfg.InternalPort)
+		log.Printf("Servidor interno iniciado en puerto %s", cfg.InternalPort)
 		errCh <- internalRouter.Run(":" + cfg.InternalPort)
 	}()
 
