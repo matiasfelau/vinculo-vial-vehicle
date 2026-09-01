@@ -10,6 +10,7 @@ import (
 // Config agrupa los parámetros de configuración requeridos por el servicio.
 type Config struct {
 	Port                  string
+	InternalPort          string
 	DatabaseURL           string
 	VehicleHPKEPrivateKey string
 	PatAESKey             string
@@ -27,6 +28,7 @@ type Config struct {
 func Load() (*Config, error) {
 	cfg := &Config{
 		Port:                  os.Getenv("PORT"),
+		InternalPort:          os.Getenv("INTERNAL_PORT"),
 		DatabaseURL:           os.Getenv("DATABASE_URL"),
 		VehicleHPKEPrivateKey: os.Getenv("VEHICLE_HPKE_PRIVATE_KEY"),
 		PatAESKey:             os.Getenv("PAT_AES_KEY"),
@@ -39,6 +41,13 @@ func Load() (*Config, error) {
 
 	if cfg.Port == "" {
 		cfg.Port = "8080"
+	}
+
+	if cfg.InternalPort == "" {
+		cfg.InternalPort = "8081"
+	}
+	if cfg.InternalPort == cfg.Port {
+		return nil, fmt.Errorf("config: INTERNAL_PORT no puede coincidir con PORT: el router interno perdería su puerto propio")
 	}
 
 	timeoutRaw := os.Getenv("IDENTITY_TIMEOUT_MS")
