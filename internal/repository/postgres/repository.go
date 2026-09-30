@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"net"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgconn"
@@ -11,6 +12,11 @@ import (
 
 	"github.com/matiasfelau/vinculo-vial-vehicle/internal/domain"
 )
+
+// defaultQueryTimeout acota cada consulta cuando el llamador no especifica un
+// valor propio vía WithQueryTimeout. Sin este plazo, una consulta bloqueada
+// (lock, réplica caída) retiene la goroutine y la conexión sin límite.
+const defaultQueryTimeout = 3 * time.Second
 
 // uniqueViolationCode es el código SQLSTATE que PostgreSQL retorna ante la
 // violación de una restricción unique.
@@ -44,17 +50,39 @@ func classifyError(err error) error {
 
 // VehicleRepository implementa domain.VehicleRepository sobre PostgreSQL vía GORM.
 type VehicleRepository struct {
-	db *gorm.DB
+	db           *gorm.DB
+	queryTimeout time.Duration
+}
+
+// Option configura aspectos opcionales de VehicleRepository en su construcción.
+type Option func(*VehicleRepository)
+
+// WithQueryTimeout fija el plazo máximo de cada consulta. Agotado ese plazo,
+// el contexto se cancela con context.DeadlineExceeded, que classifyError
+// reclasifica como domain.ErrRepositoryUnavailable (503): es una
+// indisponibilidad de la base de datos, no un defecto del servicio.
+func WithQueryTimeout(timeout time.Duration) Option {
+	return func(r *VehicleRepository) {
+		r.queryTimeout = timeout
+	}
 }
 
 // NewVehicleRepository construye un VehicleRepository sobre la conexión dada.
-func NewVehicleRepository(db *gorm.DB) *VehicleRepository {
-	return &VehicleRepository{db: db}
+// Sin WithQueryTimeout, aplica defaultQueryTimeout.
+func NewVehicleRepository(db *gorm.DB, opts ...Option) *VehicleRepository {
+	r := &VehicleRepository{db: db, queryTimeout: defaultQueryTimeout}
+	for _, opt := range opts {
+		opt(r)
+	}
+	return r
 }
 
 // Create persiste el vehículo. Ante la violación de UNIQUE(owner_id, pat_hashed)
 // retorna domain.ErrDuplicateVehicle.
 func (r *VehicleRepository) Create(ctx context.Context, vehicle *domain.Vehicle) error {
+	ctx, cancel := context.WithTimeout(ctx, r.queryTimeout)
+	defer cancel()
+
 	model := vehicleModel{
 		ID:        vehicle.ID,
 		OwnerID:   vehicle.OwnerID,
@@ -76,6 +104,9 @@ func (r *VehicleRepository) Create(ctx context.Context, vehicle *domain.Vehicle)
 
 // ExistsByPatHash indica si existe al menos un vehículo con ese Blind Index.
 func (r *VehicleRepository) ExistsByPatHash(ctx context.Context, patHashed string) (bool, error) {
+	ctx, cancel := context.WithTimeout(ctx, r.queryTimeout)
+	defer cancel()
+
 	var exists bool
 	err := r.db.WithContext(ctx).
 		Raw("SELECT EXISTS(SELECT 1 FROM vehicles WHERE pat_hashed = ?)", patHashed).
@@ -89,6 +120,9 @@ func (r *VehicleRepository) ExistsByPatHash(ctx context.Context, patHashed strin
 // FindOwnersByPatHash retorna todos los owner_id vinculados a ese Blind Index.
 // Un resultado vacío es válido: significa que la patente no está en la red.
 func (r *VehicleRepository) FindOwnersByPatHash(ctx context.Context, patHashed string) ([]uuid.UUID, error) {
+	ctx, cancel := context.WithTimeout(ctx, r.queryTimeout)
+	defer cancel()
+
 	var ownerIDs []uuid.UUID
 	err := r.db.WithContext(ctx).
 		Model(&vehicleModel{}).
