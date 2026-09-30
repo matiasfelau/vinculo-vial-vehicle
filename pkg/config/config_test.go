@@ -52,6 +52,37 @@ func TestLoadConConfiguracionCompleta(t *testing.T) {
 	if cfg.IdentityCBOpenDuration != 30*time.Second {
 		t.Errorf("esperaba tiempo de apertura por defecto de 30s, obtuvo %v", cfg.IdentityCBOpenDuration)
 	}
+	if cfg.DBQueryTimeout != 3*time.Second {
+		t.Errorf("esperaba timeout de consulta por defecto de 3s, obtuvo %v", cfg.DBQueryTimeout)
+	}
+}
+
+func TestLoadDBQueryTimeoutConfigurablePorEnv(t *testing.T) {
+	setEnvCompleto(t)
+	t.Setenv("DB_QUERY_TIMEOUT_MS", "1500")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("no se esperaba error: %v", err)
+	}
+	if cfg.DBQueryTimeout != 1500*time.Millisecond {
+		t.Errorf("esperaba timeout de consulta de 1500ms, obtuvo %v", cfg.DBQueryTimeout)
+	}
+}
+
+func TestLoadDBQueryTimeoutInvalido(t *testing.T) {
+	casos := []string{"no-es-un-numero", "0", "-100"}
+
+	for _, valor := range casos {
+		t.Run(valor, func(t *testing.T) {
+			setEnvCompleto(t)
+			t.Setenv("DB_QUERY_TIMEOUT_MS", valor)
+
+			if _, err := Load(); err == nil {
+				t.Fatalf("esperaba error con DB_QUERY_TIMEOUT_MS=%q", valor)
+			}
+		})
+	}
 }
 
 func TestLoadCircuitBreakerConfigurablePorEnv(t *testing.T) {

@@ -27,6 +27,10 @@ type Config struct {
 	IdentityCBFailureThreshold int
 	IdentityCBWindow           time.Duration
 	IdentityCBOpenDuration     time.Duration
+
+	// DBQueryTimeout acota cada consulta contra la base de datos propia (ver
+	// internal/repository/postgres.WithQueryTimeout).
+	DBQueryTimeout time.Duration
 }
 
 // Load construye la configuración a partir de las variables de entorno del proceso.
@@ -97,6 +101,12 @@ func Load() (*Config, error) {
 		return nil, err
 	}
 	cfg.IdentityCBOpenDuration = cbOpenDurationMS
+
+	dbQueryTimeoutMS, err := parsePositiveMillis("DB_QUERY_TIMEOUT_MS", "3000")
+	if err != nil {
+		return nil, err
+	}
+	cfg.DBQueryTimeout = dbQueryTimeoutMS
 
 	if cfg.DatabaseURL == "" {
 		return nil, fmt.Errorf("config: DATABASE_URL es obligatoria")
