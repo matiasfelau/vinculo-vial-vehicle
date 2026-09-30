@@ -62,6 +62,8 @@ func writeResolveOwnerError(c *gin.Context, err error) {
 	switch {
 	case errors.Is(err, domain.ErrInvalidPlate), errors.Is(err, domain.ErrInvalidCryptogram):
 		c.JSON(http.StatusBadRequest, gin.H{"error": "criptograma o formato de patente inválido"})
+	case errors.Is(err, domain.ErrRepositoryUnavailable):
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "no se pudo consultar la base de datos"})
 	default:
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "error interno"})
 	}

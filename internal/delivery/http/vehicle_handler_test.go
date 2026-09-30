@@ -120,7 +120,9 @@ func TestRegisterVehicleErroresDelCasoDeUso(t *testing.T) {
 	}{
 		{"ownership mismatch", domain.ErrOwnershipMismatch, http.StatusForbidden},
 		{"identity inalcanzable", domain.ErrOwnershipUnavailable, http.StatusServiceUnavailable},
+		{"identity respondió con error de servidor", domain.ErrOwnershipUpstreamFailure, http.StatusBadGateway},
 		{"dnrpa inalcanzable", domain.ErrOwnerLookupUnavailable, http.StatusServiceUnavailable},
+		{"base de datos inalcanzable", domain.ErrRepositoryUnavailable, http.StatusServiceUnavailable},
 		{"vehiculo duplicado", domain.ErrDuplicateVehicle, http.StatusConflict},
 		{"patente invalida", domain.ErrInvalidPlate, http.StatusBadRequest},
 		{"criptograma invalido", domain.ErrInvalidCryptogram, http.StatusBadRequest},

@@ -3,6 +3,7 @@ package postgres
 import (
 	"context"
 	"errors"
+	"net"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgconn"
@@ -14,6 +15,32 @@ import (
 // uniqueViolationCode es el código SQLSTATE que PostgreSQL retorna ante la
 // violación de una restricción unique.
 const uniqueViolationCode = "23505"
+
+// classifyError distingue una indisponibilidad de infraestructura (la base de
+// datos es inalcanzable, o la consulta excedió su plazo) de un error propio de
+// la aplicación. Solo la primera categoría se envuelve en
+// domain.ErrRepositoryUnavailable, que los handlers HTTP mapean a 503: es una
+// falla de la dependencia, no un defecto del servicio.
+func classifyError(err error) error {
+	if err == nil {
+		return nil
+	}
+
+	// El plazo de la consulta (context.WithTimeout, ver Connect/repositorio) o el
+	// contexto de la solicitud entrante se agotaron antes de completarse.
+	if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) {
+		return errors.Join(domain.ErrRepositoryUnavailable, err)
+	}
+
+	// Errores de red (conexión rechazada, timeout de socket, etc.) al dialogar con
+	// la base de datos, sin llegar a obtener una respuesta del servidor SQL.
+	var netErr net.Error
+	if errors.As(err, &netErr) {
+		return errors.Join(domain.ErrRepositoryUnavailable, err)
+	}
+
+	return err
+}
 
 // VehicleRepository implementa domain.VehicleRepository sobre PostgreSQL vía GORM.
 type VehicleRepository struct {
@@ -41,7 +68,7 @@ func (r *VehicleRepository) Create(ctx context.Context, vehicle *domain.Vehicle)
 		if errors.As(err, &pgErr) && pgErr.Code == uniqueViolationCode {
 			return domain.ErrDuplicateVehicle
 		}
-		return err
+		return classifyError(err)
 	}
 
 	return nil
@@ -54,7 +81,7 @@ func (r *VehicleRepository) ExistsByPatHash(ctx context.Context, patHashed strin
 		Raw("SELECT EXISTS(SELECT 1 FROM vehicles WHERE pat_hashed = ?)", patHashed).
 		Scan(&exists).Error
 	if err != nil {
-		return false, err
+		return false, classifyError(err)
 	}
 	return exists, nil
 }
@@ -68,7 +95,7 @@ func (r *VehicleRepository) FindOwnersByPatHash(ctx context.Context, patHashed s
 		Where("pat_hashed = ?", patHashed).
 		Pluck("owner_id", &ownerIDs).Error
 	if err != nil {
-		return nil, err
+		return nil, classifyError(err)
 	}
 	return ownerIDs, nil
 }

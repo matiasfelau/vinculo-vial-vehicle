@@ -93,8 +93,11 @@ func TestVerifyOwnershipEstadoInesperado(t *testing.T) {
 	client := NewClient(server.URL, "token-de-prueba", time.Second)
 
 	_, err := client.VerifyOwnership(context.Background(), uuid.New(), []byte("criptograma-dni"))
-	if !errors.Is(err, domain.ErrOwnershipUnavailable) {
-		t.Fatalf("esperaba domain.ErrOwnershipUnavailable ante estado 500, obtuvo %v", err)
+	if !errors.Is(err, domain.ErrOwnershipUpstreamFailure) {
+		t.Fatalf("esperaba domain.ErrOwnershipUpstreamFailure ante estado 500, obtuvo %v", err)
+	}
+	if errors.Is(err, domain.ErrOwnershipUnavailable) {
+		t.Fatal("un 5xx de identity no debe clasificarse como ErrOwnershipUnavailable: el destino sí respondió")
 	}
 }
 
@@ -108,8 +111,28 @@ func TestVerifyOwnershipRespuestaMalformada(t *testing.T) {
 	client := NewClient(server.URL, "token-de-prueba", time.Second)
 
 	_, err := client.VerifyOwnership(context.Background(), uuid.New(), []byte("criptograma-dni"))
-	if !errors.Is(err, domain.ErrOwnershipUnavailable) {
-		t.Fatalf("esperaba domain.ErrOwnershipUnavailable ante respuesta malformada, obtuvo %v", err)
+	if !errors.Is(err, domain.ErrOwnershipUpstreamFailure) {
+		t.Fatalf("esperaba domain.ErrOwnershipUpstreamFailure ante respuesta malformada, obtuvo %v", err)
+	}
+}
+
+func TestVerifyOwnershipEstado4xxNoCuentaComoIndisponibilidad(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusForbidden)
+	}))
+	defer server.Close()
+
+	client := NewClient(server.URL, "token-de-prueba", time.Second)
+
+	_, err := client.VerifyOwnership(context.Background(), uuid.New(), []byte("criptograma-dni"))
+	if err == nil {
+		t.Fatal("esperaba un error ante un 4xx de identity")
+	}
+	if errors.Is(err, domain.ErrOwnershipUnavailable) {
+		t.Fatal("un 4xx de identity no debe clasificarse como ErrOwnershipUnavailable")
+	}
+	if errors.Is(err, domain.ErrOwnershipUpstreamFailure) {
+		t.Fatal("un 4xx de identity no debe clasificarse como ErrOwnershipUpstreamFailure: es un error propio, no de disponibilidad")
 	}
 }
 
