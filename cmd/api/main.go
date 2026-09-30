@@ -4,6 +4,7 @@ import (
 	"log"
 	"time"
 
+	"github.com/matiasfelau/vinculo-vial-vehicle/internal/breaker"
 	"github.com/matiasfelau/vinculo-vial-vehicle/internal/client/dnrpa"
 	"github.com/matiasfelau/vinculo-vial-vehicle/internal/client/identity"
 	"github.com/matiasfelau/vinculo-vial-vehicle/internal/crypto/hpke"
@@ -54,10 +55,12 @@ func main() {
 	repository := postgres.NewVehicleRepository(db)
 
 	identityClient := identity.NewClient(cfg.IdentityInternalURL, cfg.InternalServiceToken, time.Duration(cfg.IdentityTimeoutMS)*time.Millisecond)
+	identityCircuitBreaker := breaker.New(cfg.IdentityCBFailureThreshold, cfg.IdentityCBWindow, cfg.IdentityCBOpenDuration)
+	identityVerifier := identity.NewBreakerVerifier(identityClient, identityCircuitBreaker)
 
 	registerVehicleService := vehicle.NewRegisterVehicleService(
 		repository,
-		identityClient,
+		identityVerifier,
 		dnrpaClient,
 		payloadDecryptor,
 		dniEncryptor,
