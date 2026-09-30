@@ -52,7 +52,7 @@ func main() {
 	if err := postgres.AutoMigrate(db); err != nil {
 		log.Fatalf("no se pudo migrar el esquema: %v", err)
 	}
-	repository := postgres.NewVehicleRepository(db)
+	repository := postgres.NewVehicleRepository(db, postgres.WithQueryTimeout(cfg.DBQueryTimeout))
 
 	identityClient := identity.NewClient(cfg.IdentityInternalURL, cfg.InternalServiceToken, time.Duration(cfg.IdentityTimeoutMS)*time.Millisecond)
 	identityCircuitBreaker := breaker.New(cfg.IdentityCBFailureThreshold, cfg.IdentityCBWindow, cfg.IdentityCBOpenDuration)
