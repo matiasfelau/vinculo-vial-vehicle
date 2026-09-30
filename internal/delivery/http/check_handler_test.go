@@ -110,6 +110,19 @@ func TestCheckVehicleErroresDelCasoDeUsoRetorna400(t *testing.T) {
 	}
 }
 
+func TestCheckVehicleBaseDeDatosInalcanzableRetorna503(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	checker := &fakeCheckVehicleUseCase{err: domain.ErrRepositoryUnavailable}
+	router := NewRouter(&fakeRegisterVehicleUseCase{}, checker)
+
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, checkRequest(t, map[string]string{"pat_enc": "criptograma"}))
+
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("esperaba 503, obtuvo %d", rec.Code)
+	}
+}
+
 func TestCheckVehicleErrorInternoRetorna500(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	checker := &fakeCheckVehicleUseCase{err: errors.New("fallo interno de prueba")}
