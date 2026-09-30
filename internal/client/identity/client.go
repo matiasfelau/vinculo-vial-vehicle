@@ -66,17 +66,32 @@ func (c *Client) VerifyOwnership(ctx context.Context, ownerID uuid.UUID, dniEnc 
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
+		// El destino nunca respondió: timeout o error de conexión. Cuenta como falla
+		// de disponibilidad (503) para el circuit breaker de esta dependencia.
 		return false, fmt.Errorf("%w: %v", domain.ErrOwnershipUnavailable, err)
 	}
 	defer resp.Body.Close()
 
+	// Un 5xx significa que identity fue alcanzado pero falló al procesar la solicitud:
+	// es un error de la dependencia, no de disponibilidad de red (502), y también
+	// cuenta como falla para el breaker.
+	if resp.StatusCode >= http.StatusInternalServerError {
+		return false, fmt.Errorf("%w: identity respondió con estado %d", domain.ErrOwnershipUpstreamFailure, resp.StatusCode)
+	}
+
+	// Un 4xx indica que esta solicitud fue rechazada por su contenido (error de
+	// configuración o de negocio propio), no una indisponibilidad de identity: no se
+	// envuelve en ninguno de los dos sentinels anteriores y por lo tanto no cuenta
+	// como falla para el breaker.
 	if resp.StatusCode != http.StatusOK {
-		return false, fmt.Errorf("%w: identity respondió con estado %d", domain.ErrOwnershipUnavailable, resp.StatusCode)
+		return false, fmt.Errorf("domain: identity rechazó la solicitud con estado %d", resp.StatusCode)
 	}
 
 	var respBody verifyOwnershipResponse
 	if err := json.NewDecoder(resp.Body).Decode(&respBody); err != nil {
-		return false, fmt.Errorf("%w: respuesta inválida: %v", domain.ErrOwnershipUnavailable, err)
+		// El destino respondió 200 pero con un cuerpo inválido: mismo tratamiento que
+		// un 5xx, el destino fue alcanzado pero la respuesta no es utilizable.
+		return false, fmt.Errorf("%w: respuesta inválida: %v", domain.ErrOwnershipUpstreamFailure, err)
 	}
 
 	return respBody.Match, nil
