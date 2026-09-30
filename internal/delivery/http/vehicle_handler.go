@@ -64,8 +64,12 @@ func writeRegisterVehicleError(c *gin.Context, err error) {
 		c.JSON(http.StatusForbidden, gin.H{"error": "el dni no corresponde al propietario de la sesión"})
 	case errors.Is(err, domain.ErrOwnershipUnavailable):
 		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "no se pudo verificar la propiedad del vehículo"})
+	case errors.Is(err, domain.ErrOwnershipUpstreamFailure):
+		c.JSON(http.StatusBadGateway, gin.H{"error": "identity respondió con un error al verificar la propiedad"})
 	case errors.Is(err, domain.ErrOwnerLookupUnavailable):
 		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "no se pudo consultar la titularidad del vehículo"})
+	case errors.Is(err, domain.ErrRepositoryUnavailable):
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "no se pudo consultar la base de datos"})
 	case errors.Is(err, domain.ErrDuplicateVehicle):
 		c.JSON(http.StatusConflict, gin.H{"error": "el vehículo ya está vinculado a este propietario"})
 	case errors.Is(err, domain.ErrInvalidPlate), errors.Is(err, domain.ErrInvalidCryptogram):
