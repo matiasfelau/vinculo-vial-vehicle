@@ -25,6 +25,12 @@ var (
 	// indisponibilidad de infraestructura, no un defecto del servicio.
 	ErrRepositoryUnavailable = errors.New("domain: no se pudo consultar la base de datos")
 
+	// ErrOwnershipCircuitOpen indica que el circuit breaker hacia identity está
+	// abierto: la llamada falla de inmediato sin alcanzar al destino. Se mapea a 503,
+	// igual que ErrOwnershipUnavailable, pero se distingue de esta para que un log o
+	// una métrica puedan diferenciar el fail-fast del propio breaker de un timeout real.
+	ErrOwnershipCircuitOpen = errors.New("domain: el circuito hacia identity está abierto")
+
 	// ErrInvalidPlate indica que la patente desencriptada no cumple el formato argentino esperado.
 	ErrInvalidPlate = errors.New("domain: formato de patente inválido")
 
