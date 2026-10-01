@@ -15,8 +15,11 @@ import (
 
 // defaultQueryTimeout acota cada consulta cuando el llamador no especifica un
 // valor propio vía WithQueryTimeout. Sin este plazo, una consulta bloqueada
-// (lock, réplica caída) retiene la goroutine y la conexión sin límite.
-const defaultQueryTimeout = 3 * time.Second
+// (lock, réplica caída) retiene la goroutine y la conexión sin límite. Se
+// mantiene alineado con el default de DB_QUERY_TIMEOUT_MS (ver pkg/config):
+// por debajo del timeout servicio-a-servicio con el que Alert llama a este
+// servicio, para no violar la regla de anidamiento de timeouts.
+const defaultQueryTimeout = 1500 * time.Millisecond
 
 // uniqueViolationCode es el código SQLSTATE que PostgreSQL retorna ante la
 // violación de una restricción unique.

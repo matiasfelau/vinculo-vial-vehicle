@@ -52,8 +52,8 @@ func TestLoadConConfiguracionCompleta(t *testing.T) {
 	if cfg.IdentityCBOpenDuration != 30*time.Second {
 		t.Errorf("esperaba tiempo de apertura por defecto de 30s, obtuvo %v", cfg.IdentityCBOpenDuration)
 	}
-	if cfg.DBQueryTimeout != 3*time.Second {
-		t.Errorf("esperaba timeout de consulta por defecto de 3s, obtuvo %v", cfg.DBQueryTimeout)
+	if cfg.DBQueryTimeout != 1500*time.Millisecond {
+		t.Errorf("esperaba timeout de consulta por defecto de 1500ms, obtuvo %v", cfg.DBQueryTimeout)
 	}
 }
 

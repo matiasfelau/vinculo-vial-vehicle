@@ -102,7 +102,12 @@ func Load() (*Config, error) {
 	}
 	cfg.IdentityCBOpenDuration = cbOpenDurationMS
 
-	dbQueryTimeoutMS, err := parsePositiveMillis("DB_QUERY_TIMEOUT_MS", "3000")
+	// El default debe mantenerse por debajo del timeout servicio-a-servicio con el
+	// que vinculo-vial-alert llama a este servicio (2000ms): si la consulta a la
+	// base propia pudiera tardar más que eso, Alert abandonaría la espera antes de
+	// que Vehicle llegue a responder el 503, violando la regla de anidamiento de
+	// timeouts de la plataforma (servicio→servicio > deadline de consulta DB).
+	dbQueryTimeoutMS, err := parsePositiveMillis("DB_QUERY_TIMEOUT_MS", "1500")
 	if err != nil {
 		return nil, err
 	}
