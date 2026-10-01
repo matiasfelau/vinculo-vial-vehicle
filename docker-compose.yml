@@ -13,7 +13,7 @@ services:
     environment:
       PORT: ${PORT:-8080}
       DATABASE_URL: postgres://vehicle:vehicle@vinculo-vial-vehicle-db:5432/vehicle?sslmode=disable
-      DB_QUERY_TIMEOUT_MS: ${DB_QUERY_TIMEOUT_MS:-3000}
+      DB_QUERY_TIMEOUT_MS: ${DB_QUERY_TIMEOUT_MS:-1500}
       VEHICLE_HPKE_PRIVATE_KEY: ${VEHICLE_HPKE_PRIVATE_KEY}
       PAT_AES_KEY: ${PAT_AES_KEY}
       PAT_HMAC_SECRET: ${PAT_HMAC_SECRET}
