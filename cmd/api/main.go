@@ -90,7 +90,7 @@ func main() {
 	checkVehicleService := lookup.NewCheckVehicleService(repository, payloadDecryptor, []byte(cfg.PatHMACSecret))
 	resolveOwnersService := lookup.NewResolveOwnersService(repository, payloadDecryptor, []byte(cfg.PatHMACSecret))
 
-	router := httpdelivery.NewRouter(registerVehicleService, checkVehicleService)
+	router := httpdelivery.NewRouter(registerVehicleService, checkVehicleService, repository)
 	internalRouter := httpdelivery.NewInternalRouter(cfg.InternalServiceToken, resolveOwnersService)
 
 	publicServer := &http.Server{

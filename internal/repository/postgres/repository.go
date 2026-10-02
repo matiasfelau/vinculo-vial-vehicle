@@ -48,6 +48,16 @@ func classifyError(err error) error {
 		return errors.Join(domain.ErrRepositoryUnavailable, err)
 	}
 
+	// Códigos SQLSTATE de indisponibilidad (contractual):
+	// 08xxx (conexión), 53xxx (recursos), 57014 (statement_timeout), 57P0x (reinicio/apagado).
+	var pgErr *pgconn.PgError
+	if errors.As(err, &pgErr) {
+		code := pgErr.Code
+		if len(code) >= 2 && (code[:2] == "08" || code[:2] == "53" || code == "57014" || (len(code) >= 4 && code[:4] == "57P0")) {
+			return errors.Join(domain.ErrRepositoryUnavailable, err)
+		}
+	}
+
 	return err
 }
 
@@ -135,4 +145,19 @@ func (r *VehicleRepository) FindOwnersByPatHash(ctx context.Context, patHashed s
 		return nil, classifyError(err)
 	}
 	return ownerIDs, nil
+}
+
+// Ping verifica la conectividad con la base de datos.
+func (r *VehicleRepository) Ping(ctx context.Context) error {
+	ctx, cancel := context.WithTimeout(ctx, r.queryTimeout)
+	defer cancel()
+
+	db, err := r.db.DB()
+	if err != nil {
+		return classifyError(err)
+	}
+	if err := db.PingContext(ctx); err != nil {
+		return classifyError(err)
+	}
+	return nil
 }

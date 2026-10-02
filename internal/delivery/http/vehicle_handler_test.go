@@ -50,7 +50,7 @@ func cuerpoValido() registerVehicleRequest {
 func TestRegisterVehicleSinXUserIdRetorna401(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	useCase := &fakeRegisterVehicleUseCase{}
-	router := NewRouter(useCase, &fakeCheckVehicleUseCase{})
+	router := NewRouter(useCase, &fakeCheckVehicleUseCase{}, &fakePingable{})
 
 	rec := httptest.NewRecorder()
 	router.ServeHTTP(rec, vehiclesRequest(t, "", cuerpoValido()))
@@ -66,7 +66,7 @@ func TestRegisterVehicleSinXUserIdRetorna401(t *testing.T) {
 func TestRegisterVehicleConXUserIdInvalidoRetorna401(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	useCase := &fakeRegisterVehicleUseCase{}
-	router := NewRouter(useCase, &fakeCheckVehicleUseCase{})
+	router := NewRouter(useCase, &fakeCheckVehicleUseCase{}, &fakePingable{})
 
 	rec := httptest.NewRecorder()
 	router.ServeHTTP(rec, vehiclesRequest(t, "no-es-un-uuid", cuerpoValido()))
@@ -79,7 +79,7 @@ func TestRegisterVehicleConXUserIdInvalidoRetorna401(t *testing.T) {
 func TestRegisterVehiclePayloadMalFormadoRetorna400(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	useCase := &fakeRegisterVehicleUseCase{}
-	router := NewRouter(useCase, &fakeCheckVehicleUseCase{})
+	router := NewRouter(useCase, &fakeCheckVehicleUseCase{}, &fakePingable{})
 
 	rec := httptest.NewRecorder()
 	router.ServeHTTP(rec, vehiclesRequest(t, uuid.NewString(), map[string]string{"payload_enc": ""}))
@@ -95,7 +95,7 @@ func TestRegisterVehiclePayloadMalFormadoRetorna400(t *testing.T) {
 func TestRegisterVehicleExitoRetorna201(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	useCase := &fakeRegisterVehicleUseCase{}
-	router := NewRouter(useCase, &fakeCheckVehicleUseCase{})
+	router := NewRouter(useCase, &fakeCheckVehicleUseCase{}, &fakePingable{})
 
 	ownerID := uuid.New()
 	rec := httptest.NewRecorder()
@@ -133,7 +133,7 @@ func TestRegisterVehicleErroresDelCasoDeUso(t *testing.T) {
 		t.Run(c.nombre, func(t *testing.T) {
 			gin.SetMode(gin.TestMode)
 			useCase := &fakeRegisterVehicleUseCase{err: c.err}
-			router := NewRouter(useCase, &fakeCheckVehicleUseCase{})
+			router := NewRouter(useCase, &fakeCheckVehicleUseCase{}, &fakePingable{})
 
 			rec := httptest.NewRecorder()
 			router.ServeHTTP(rec, vehiclesRequest(t, uuid.NewString(), cuerpoValido()))

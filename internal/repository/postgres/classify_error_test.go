@@ -7,6 +7,8 @@ import (
 	"testing"
 
 	"github.com/matiasfelau/vinculo-vial-vehicle/internal/domain"
+
+	"github.com/jackc/pgx/v5/pgconn"
 )
 
 // fakeNetError implementa net.Error para probar classifyError sin depender de
@@ -54,5 +56,32 @@ func TestClassifyErrorOtroErrorNoSeReclasifica(t *testing.T) {
 	}
 	if !errors.Is(err, original) {
 		t.Fatal("el error original debe preservarse cuando no se reclasifica")
+	}
+}
+
+func TestClassifyErrorPgErrorSQLState(t *testing.T) {
+	tests := []struct {
+		name string
+		code string
+		want bool
+	}{
+		{"08xxx (Connection Exception)", "08001", true},
+		{"53xxx (Insufficient Resources)", "53300", true},
+		{"57014 (Query Canceled)", "57014", true},
+		{"57P01 (Admin Shutdown)", "57P01", true},
+		{"57P02 (Crash Shutdown)", "57P02", true},
+		{"57000 (Operator Intervention, no match)", "57000", false},
+		{"23505 (Unique Violation)", "23505", false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// github.com/jackc/pgx/v5/pgconn.PgError
+			err := classifyError(&pgconn.PgError{Code: tt.code})
+			got := errors.Is(err, domain.ErrRepositoryUnavailable)
+			if got != tt.want {
+				t.Errorf("classifyError(PgError{Code: %q}): obtuvo %v, esperaba %v", tt.code, got, tt.want)
+			}
+		})
 	}
 }
