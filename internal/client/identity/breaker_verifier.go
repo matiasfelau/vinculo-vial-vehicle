@@ -53,3 +53,9 @@ func (b *BreakerVerifier) VerifyOwnership(ctx context.Context, ownerID uuid.UUID
 func esFallaContabilizable(err error) bool {
 	return errors.Is(err, domain.ErrOwnershipUnavailable) || errors.Is(err, domain.ErrOwnershipUpstreamFailure)
 }
+
+// CircuitState expone el estado del circuit breaker hacia identity para el
+// endpoint /health/deps: "closed", "open" o "half-open".
+func (b *BreakerVerifier) CircuitState() string {
+	return b.cb.State()
+}

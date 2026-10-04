@@ -117,3 +117,19 @@ func TestBreakerVerifierUnExitoTrasFallasCierraElCircuito(t *testing.T) {
 		t.Fatalf("esperaba que el circuito siguiera cerrado tras el éxito, obtuvo %v", err)
 	}
 }
+
+func TestBreakerVerifierCircuitStateReflejaElBreaker(t *testing.T) {
+	fv := &fakeVerifier{err: domain.ErrOwnershipUnavailable}
+	cb := breaker.New(1, time.Minute, time.Minute)
+	bv := NewBreakerVerifier(fv, cb)
+
+	if got := bv.CircuitState(); got != "closed" {
+		t.Fatalf("esperaba \"closed\" antes de fallar, obtuvo %q", got)
+	}
+
+	bv.VerifyOwnership(context.Background(), uuid.New(), nil)
+
+	if got := bv.CircuitState(); got != "open" {
+		t.Fatalf("esperaba \"open\" tras alcanzar el umbral, obtuvo %q", got)
+	}
+}
