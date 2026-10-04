@@ -11,7 +11,7 @@ import (
 
 func TestHealthCheck(t *testing.T) {
 	gin.SetMode(gin.TestMode)
-	router := NewRouter(&fakeRegisterVehicleUseCase{}, &fakeCheckVehicleUseCase{}, &fakePingable{})
+	router := NewRouter(&fakeRegisterVehicleUseCase{}, &fakeCheckVehicleUseCase{}, &fakePingable{}, &fakeCircuitReporter{estado: "closed"})
 
 	req := httptest.NewRequest(http.MethodGet, "/health", nil)
 	rec := httptest.NewRecorder()
@@ -25,7 +25,7 @@ func TestHealthCheck(t *testing.T) {
 
 func TestReadyCheckOk(t *testing.T) {
 	gin.SetMode(gin.TestMode)
-	router := NewRouter(&fakeRegisterVehicleUseCase{}, &fakeCheckVehicleUseCase{}, &fakePingable{err: nil})
+	router := NewRouter(&fakeRegisterVehicleUseCase{}, &fakeCheckVehicleUseCase{}, &fakePingable{err: nil}, &fakeCircuitReporter{estado: "closed"})
 
 	req := httptest.NewRequest(http.MethodGet, "/ready", nil)
 	rec := httptest.NewRecorder()
@@ -39,7 +39,7 @@ func TestReadyCheckOk(t *testing.T) {
 
 func TestReadyCheckError(t *testing.T) {
 	gin.SetMode(gin.TestMode)
-	router := NewRouter(&fakeRegisterVehicleUseCase{}, &fakeCheckVehicleUseCase{}, &fakePingable{err: context.DeadlineExceeded})
+	router := NewRouter(&fakeRegisterVehicleUseCase{}, &fakeCheckVehicleUseCase{}, &fakePingable{err: context.DeadlineExceeded}, &fakeCircuitReporter{estado: "closed"})
 
 	req := httptest.NewRequest(http.MethodGet, "/ready", nil)
 	rec := httptest.NewRecorder()
