@@ -119,3 +119,24 @@ func (b *Breaker) RecordFailure() {
 		b.failures = 0
 	}
 }
+
+// State devuelve el estado efectivo del circuito como texto: "closed", "open"
+// o "half-open". Un circuito abierto cuyo tiempo de apertura ya transcurrió se
+// reporta como "half-open", porque la próxima llamada será la prueba. A
+// diferencia de Allow, consultar el estado no modifica el breaker.
+func (b *Breaker) State() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+
+	switch b.state {
+	case open:
+		if b.now().Sub(b.openedAt) >= b.openDuration {
+			return "half-open"
+		}
+		return "open"
+	case halfOpen:
+		return "half-open"
+	default:
+		return "closed"
+	}
+}
