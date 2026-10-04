@@ -43,7 +43,7 @@ func checkRequest(t *testing.T, body any) *http.Request {
 func TestCheckVehiclePatenteExistenteRetorna200(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	checker := &fakeCheckVehicleUseCase{exists: true}
-	router := NewRouter(&fakeRegisterVehicleUseCase{}, checker)
+	router := NewRouter(&fakeRegisterVehicleUseCase{}, checker, &fakePingable{}, &fakeCircuitReporter{estado: "closed"})
 
 	rec := httptest.NewRecorder()
 	router.ServeHTTP(rec, checkRequest(t, map[string]string{"pat_enc": "criptograma"}))
@@ -59,7 +59,7 @@ func TestCheckVehiclePatenteExistenteRetorna200(t *testing.T) {
 func TestCheckVehiclePatenteInexistenteRetorna404(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	checker := &fakeCheckVehicleUseCase{exists: false}
-	router := NewRouter(&fakeRegisterVehicleUseCase{}, checker)
+	router := NewRouter(&fakeRegisterVehicleUseCase{}, checker, &fakePingable{}, &fakeCircuitReporter{estado: "closed"})
 
 	rec := httptest.NewRecorder()
 	router.ServeHTTP(rec, checkRequest(t, map[string]string{"pat_enc": "criptograma"}))
@@ -72,7 +72,7 @@ func TestCheckVehiclePatenteInexistenteRetorna404(t *testing.T) {
 func TestCheckVehiclePayloadMalFormadoRetorna400(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	checker := &fakeCheckVehicleUseCase{}
-	router := NewRouter(&fakeRegisterVehicleUseCase{}, checker)
+	router := NewRouter(&fakeRegisterVehicleUseCase{}, checker, &fakePingable{}, &fakeCircuitReporter{estado: "closed"})
 
 	rec := httptest.NewRecorder()
 	router.ServeHTTP(rec, checkRequest(t, map[string]string{"pat_enc": ""}))
@@ -98,7 +98,7 @@ func TestCheckVehicleErroresDelCasoDeUsoRetorna400(t *testing.T) {
 		t.Run(c.nombre, func(t *testing.T) {
 			gin.SetMode(gin.TestMode)
 			checker := &fakeCheckVehicleUseCase{err: c.err}
-			router := NewRouter(&fakeRegisterVehicleUseCase{}, checker)
+			router := NewRouter(&fakeRegisterVehicleUseCase{}, checker, &fakePingable{}, &fakeCircuitReporter{estado: "closed"})
 
 			rec := httptest.NewRecorder()
 			router.ServeHTTP(rec, checkRequest(t, map[string]string{"pat_enc": "criptograma"}))
@@ -110,10 +110,23 @@ func TestCheckVehicleErroresDelCasoDeUsoRetorna400(t *testing.T) {
 	}
 }
 
+func TestCheckVehicleBaseDeDatosInalcanzableRetorna503(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	checker := &fakeCheckVehicleUseCase{err: domain.ErrRepositoryUnavailable}
+	router := NewRouter(&fakeRegisterVehicleUseCase{}, checker, &fakePingable{}, &fakeCircuitReporter{estado: "closed"})
+
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, checkRequest(t, map[string]string{"pat_enc": "criptograma"}))
+
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("esperaba 503, obtuvo %d", rec.Code)
+	}
+}
+
 func TestCheckVehicleErrorInternoRetorna500(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	checker := &fakeCheckVehicleUseCase{err: errors.New("fallo interno de prueba")}
-	router := NewRouter(&fakeRegisterVehicleUseCase{}, checker)
+	router := NewRouter(&fakeRegisterVehicleUseCase{}, checker, &fakePingable{}, &fakeCircuitReporter{estado: "closed"})
 
 	rec := httptest.NewRecorder()
 	router.ServeHTTP(rec, checkRequest(t, map[string]string{"pat_enc": "criptograma"}))

@@ -1,6 +1,9 @@
 package config
 
-import "testing"
+import (
+	"testing"
+	"time"
+)
 
 func setEnvCompleto(t *testing.T) {
 	t.Helper()
@@ -39,6 +42,91 @@ func TestLoadConConfiguracionCompleta(t *testing.T) {
 	}
 	if cfg.InternalPort != "8081" {
 		t.Errorf("esperaba puerto interno por defecto 8081, obtuvo %q", cfg.InternalPort)
+	}
+	if cfg.IdentityCBFailureThreshold != 5 {
+		t.Errorf("esperaba umbral de fallas por defecto 5, obtuvo %d", cfg.IdentityCBFailureThreshold)
+	}
+	if cfg.IdentityCBWindow != 30*time.Second {
+		t.Errorf("esperaba ventana por defecto de 30s, obtuvo %v", cfg.IdentityCBWindow)
+	}
+	if cfg.IdentityCBOpenDuration != 30*time.Second {
+		t.Errorf("esperaba tiempo de apertura por defecto de 30s, obtuvo %v", cfg.IdentityCBOpenDuration)
+	}
+	if cfg.DBQueryTimeout != 1500*time.Millisecond {
+		t.Errorf("esperaba timeout de consulta por defecto de 1500ms, obtuvo %v", cfg.DBQueryTimeout)
+	}
+}
+
+func TestLoadDBQueryTimeoutConfigurablePorEnv(t *testing.T) {
+	setEnvCompleto(t)
+	t.Setenv("DB_QUERY_TIMEOUT_MS", "1500")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("no se esperaba error: %v", err)
+	}
+	if cfg.DBQueryTimeout != 1500*time.Millisecond {
+		t.Errorf("esperaba timeout de consulta de 1500ms, obtuvo %v", cfg.DBQueryTimeout)
+	}
+}
+
+func TestLoadDBQueryTimeoutInvalido(t *testing.T) {
+	casos := []string{"no-es-un-numero", "0", "-100"}
+
+	for _, valor := range casos {
+		t.Run(valor, func(t *testing.T) {
+			setEnvCompleto(t)
+			t.Setenv("DB_QUERY_TIMEOUT_MS", valor)
+
+			if _, err := Load(); err == nil {
+				t.Fatalf("esperaba error con DB_QUERY_TIMEOUT_MS=%q", valor)
+			}
+		})
+	}
+}
+
+func TestLoadCircuitBreakerConfigurablePorEnv(t *testing.T) {
+	setEnvCompleto(t)
+	t.Setenv("IDENTITY_CB_FAILURE_THRESHOLD", "3")
+	t.Setenv("IDENTITY_CB_WINDOW_MS", "10000")
+	t.Setenv("IDENTITY_CB_OPEN_DURATION_MS", "5000")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("no se esperaba error: %v", err)
+	}
+	if cfg.IdentityCBFailureThreshold != 3 {
+		t.Errorf("esperaba umbral 3, obtuvo %d", cfg.IdentityCBFailureThreshold)
+	}
+	if cfg.IdentityCBWindow != 10*time.Second {
+		t.Errorf("esperaba ventana de 10s, obtuvo %v", cfg.IdentityCBWindow)
+	}
+	if cfg.IdentityCBOpenDuration != 5*time.Second {
+		t.Errorf("esperaba tiempo de apertura de 5s, obtuvo %v", cfg.IdentityCBOpenDuration)
+	}
+}
+
+func TestLoadCircuitBreakerConfigInvalida(t *testing.T) {
+	casos := []struct {
+		nombre string
+		clave  string
+		valor  string
+	}{
+		{"umbral no numérico", "IDENTITY_CB_FAILURE_THRESHOLD", "no-es-un-numero"},
+		{"ventana no numérica", "IDENTITY_CB_WINDOW_MS", "no-es-un-numero"},
+		{"ventana negativa", "IDENTITY_CB_WINDOW_MS", "-1"},
+		{"apertura cero", "IDENTITY_CB_OPEN_DURATION_MS", "0"},
+	}
+
+	for _, c := range casos {
+		t.Run(c.nombre, func(t *testing.T) {
+			setEnvCompleto(t)
+			t.Setenv(c.clave, c.valor)
+
+			if _, err := Load(); err == nil {
+				t.Fatalf("esperaba error con %s=%q", c.clave, c.valor)
+			}
+		})
 	}
 }
 

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"strconv"
+	"time"
 )
 
 // Config agrupa los parámetros de configuración requeridos por el servicio.
@@ -21,6 +22,15 @@ type Config struct {
 	MockDNRPAOwnerDNI     string
 	InternalServiceToken  string
 	EphemeralDB           bool
+
+	// Parámetros del circuit breaker hacia identity (ver internal/breaker).
+	IdentityCBFailureThreshold int
+	IdentityCBWindow           time.Duration
+	IdentityCBOpenDuration     time.Duration
+
+	// DBQueryTimeout acota cada consulta contra la base de datos propia (ver
+	// internal/repository/postgres.WithQueryTimeout).
+	DBQueryTimeout time.Duration
 }
 
 // Load construye la configuración a partir de las variables de entorno del proceso.
@@ -70,6 +80,39 @@ func Load() (*Config, error) {
 	}
 	cfg.EphemeralDB = ephemeralDB
 
+	cbThresholdRaw := os.Getenv("IDENTITY_CB_FAILURE_THRESHOLD")
+	if cbThresholdRaw == "" {
+		cbThresholdRaw = "5"
+	}
+	cbThreshold, err := strconv.Atoi(cbThresholdRaw)
+	if err != nil {
+		return nil, fmt.Errorf("config: IDENTITY_CB_FAILURE_THRESHOLD inválido: %w", err)
+	}
+	cfg.IdentityCBFailureThreshold = cbThreshold
+
+	cbWindowMS, err := parsePositiveMillis("IDENTITY_CB_WINDOW_MS", "30000")
+	if err != nil {
+		return nil, err
+	}
+	cfg.IdentityCBWindow = cbWindowMS
+
+	cbOpenDurationMS, err := parsePositiveMillis("IDENTITY_CB_OPEN_DURATION_MS", "30000")
+	if err != nil {
+		return nil, err
+	}
+	cfg.IdentityCBOpenDuration = cbOpenDurationMS
+
+	// El default debe mantenerse por debajo del timeout servicio-a-servicio con el
+	// que vinculo-vial-alert llama a este servicio (2000ms): si la consulta a la
+	// base propia pudiera tardar más que eso, Alert abandonaría la espera antes de
+	// que Vehicle llegue a responder el 503, violando la regla de anidamiento de
+	// timeouts de la plataforma (servicio→servicio > deadline de consulta DB).
+	dbQueryTimeoutMS, err := parsePositiveMillis("DB_QUERY_TIMEOUT_MS", "1500")
+	if err != nil {
+		return nil, err
+	}
+	cfg.DBQueryTimeout = dbQueryTimeoutMS
+
 	if cfg.DatabaseURL == "" {
 		return nil, fmt.Errorf("config: DATABASE_URL es obligatoria")
 	}
@@ -96,4 +139,24 @@ func Load() (*Config, error) {
 	}
 
 	return cfg, nil
+}
+
+// parsePositiveMillis lee la variable de entorno name como una cantidad de
+// milisegundos y la convierte a time.Duration, usando defaultRaw cuando la
+// variable no está definida.
+func parsePositiveMillis(name, defaultRaw string) (time.Duration, error) {
+	raw := os.Getenv(name)
+	if raw == "" {
+		raw = defaultRaw
+	}
+
+	ms, err := strconv.Atoi(raw)
+	if err != nil {
+		return 0, fmt.Errorf("config: %s inválido: %w", name, err)
+	}
+	if ms <= 0 {
+		return 0, fmt.Errorf("config: %s debe ser mayor a cero", name)
+	}
+
+	return time.Duration(ms) * time.Millisecond, nil
 }

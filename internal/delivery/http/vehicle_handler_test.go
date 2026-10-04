@@ -50,7 +50,7 @@ func cuerpoValido() registerVehicleRequest {
 func TestRegisterVehicleSinXUserIdRetorna401(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	useCase := &fakeRegisterVehicleUseCase{}
-	router := NewRouter(useCase, &fakeCheckVehicleUseCase{})
+	router := NewRouter(useCase, &fakeCheckVehicleUseCase{}, &fakePingable{}, &fakeCircuitReporter{estado: "closed"})
 
 	rec := httptest.NewRecorder()
 	router.ServeHTTP(rec, vehiclesRequest(t, "", cuerpoValido()))
@@ -66,7 +66,7 @@ func TestRegisterVehicleSinXUserIdRetorna401(t *testing.T) {
 func TestRegisterVehicleConXUserIdInvalidoRetorna401(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	useCase := &fakeRegisterVehicleUseCase{}
-	router := NewRouter(useCase, &fakeCheckVehicleUseCase{})
+	router := NewRouter(useCase, &fakeCheckVehicleUseCase{}, &fakePingable{}, &fakeCircuitReporter{estado: "closed"})
 
 	rec := httptest.NewRecorder()
 	router.ServeHTTP(rec, vehiclesRequest(t, "no-es-un-uuid", cuerpoValido()))
@@ -79,7 +79,7 @@ func TestRegisterVehicleConXUserIdInvalidoRetorna401(t *testing.T) {
 func TestRegisterVehiclePayloadMalFormadoRetorna400(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	useCase := &fakeRegisterVehicleUseCase{}
-	router := NewRouter(useCase, &fakeCheckVehicleUseCase{})
+	router := NewRouter(useCase, &fakeCheckVehicleUseCase{}, &fakePingable{}, &fakeCircuitReporter{estado: "closed"})
 
 	rec := httptest.NewRecorder()
 	router.ServeHTTP(rec, vehiclesRequest(t, uuid.NewString(), map[string]string{"payload_enc": ""}))
@@ -95,7 +95,7 @@ func TestRegisterVehiclePayloadMalFormadoRetorna400(t *testing.T) {
 func TestRegisterVehicleExitoRetorna201(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	useCase := &fakeRegisterVehicleUseCase{}
-	router := NewRouter(useCase, &fakeCheckVehicleUseCase{})
+	router := NewRouter(useCase, &fakeCheckVehicleUseCase{}, &fakePingable{}, &fakeCircuitReporter{estado: "closed"})
 
 	ownerID := uuid.New()
 	rec := httptest.NewRecorder()
@@ -120,7 +120,10 @@ func TestRegisterVehicleErroresDelCasoDeUso(t *testing.T) {
 	}{
 		{"ownership mismatch", domain.ErrOwnershipMismatch, http.StatusForbidden},
 		{"identity inalcanzable", domain.ErrOwnershipUnavailable, http.StatusServiceUnavailable},
+		{"circuito hacia identity abierto", domain.ErrOwnershipCircuitOpen, http.StatusServiceUnavailable},
+		{"identity respondió con error de servidor", domain.ErrOwnershipUpstreamFailure, http.StatusBadGateway},
 		{"dnrpa inalcanzable", domain.ErrOwnerLookupUnavailable, http.StatusServiceUnavailable},
+		{"base de datos inalcanzable", domain.ErrRepositoryUnavailable, http.StatusServiceUnavailable},
 		{"vehiculo duplicado", domain.ErrDuplicateVehicle, http.StatusConflict},
 		{"patente invalida", domain.ErrInvalidPlate, http.StatusBadRequest},
 		{"criptograma invalido", domain.ErrInvalidCryptogram, http.StatusBadRequest},
@@ -130,7 +133,7 @@ func TestRegisterVehicleErroresDelCasoDeUso(t *testing.T) {
 		t.Run(c.nombre, func(t *testing.T) {
 			gin.SetMode(gin.TestMode)
 			useCase := &fakeRegisterVehicleUseCase{err: c.err}
-			router := NewRouter(useCase, &fakeCheckVehicleUseCase{})
+			router := NewRouter(useCase, &fakeCheckVehicleUseCase{}, &fakePingable{}, &fakeCircuitReporter{estado: "closed"})
 
 			rec := httptest.NewRecorder()
 			router.ServeHTTP(rec, vehiclesRequest(t, uuid.NewString(), cuerpoValido()))

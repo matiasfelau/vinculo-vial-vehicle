@@ -145,6 +145,19 @@ func TestResolveOwnerErroresDeFormatoDelCasoDeUsoRetorna400(t *testing.T) {
 	}
 }
 
+func TestResolveOwnerBaseDeDatosInalcanzableRetorna503(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	resolver := &fakeResolveOwnersUseCase{err: domain.ErrRepositoryUnavailable}
+	router := NewInternalRouter(secretoDePrueba, resolver)
+
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, resolveOwnerRequestBody(t, map[string]string{"pat_enc": "criptograma"}))
+
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("esperaba 503, obtuvo %d", rec.Code)
+	}
+}
+
 func TestResolveOwnerErrorInternoRetorna500(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	resolver := &fakeResolveOwnersUseCase{err: errors.New("fallo de base de datos")}
