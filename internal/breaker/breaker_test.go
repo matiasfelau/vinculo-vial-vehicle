@@ -186,3 +186,69 @@ func TestLaLlamadaDePruebaFallidaReabreElCircuitoDeInmediato(t *testing.T) {
 		t.Fatal("esperaba admitir una nueva prueba tras openDuration desde la reapertura")
 	}
 }
+
+func TestStateReportaClosedInicialmente(t *testing.T) {
+	ahora := time.Now()
+	b := nuevoConReloj(1, time.Minute, 10*time.Second, &ahora)
+
+	if got := b.State(); got != "closed" {
+		t.Fatalf("esperaba \"closed\", obtuvo %q", got)
+	}
+}
+
+func TestStateReportaOpenAlAbrirse(t *testing.T) {
+	ahora := time.Now()
+	b := nuevoConReloj(1, time.Minute, 10*time.Second, &ahora)
+
+	b.Allow()
+	b.RecordFailure()
+
+	if got := b.State(); got != "open" {
+		t.Fatalf("esperaba \"open\", obtuvo %q", got)
+	}
+}
+
+func TestStateReportaHalfOpenTranscurridoOpenDuration(t *testing.T) {
+	ahora := time.Now()
+	b := nuevoConReloj(1, time.Minute, 10*time.Second, &ahora)
+
+	b.Allow()
+	b.RecordFailure()
+	ahora = ahora.Add(11 * time.Second)
+
+	// Sin ninguna llamada de por medio: el estado efectivo ya es half-open,
+	// porque la próxima llamada será la prueba.
+	if got := b.State(); got != "half-open" {
+		t.Fatalf("esperaba \"half-open\", obtuvo %q", got)
+	}
+}
+
+func TestStateNoModificaElComportamientoDelBreaker(t *testing.T) {
+	ahora := time.Now()
+	b := nuevoConReloj(1, time.Minute, 10*time.Second, &ahora)
+
+	b.Allow()
+	b.RecordFailure()
+	ahora = ahora.Add(11 * time.Second)
+
+	_ = b.State()
+
+	if !b.Allow() {
+		t.Fatal("consultar el estado no debe consumir la llamada de prueba")
+	}
+}
+
+func TestStateReportaClosedTrasExito(t *testing.T) {
+	ahora := time.Now()
+	b := nuevoConReloj(1, time.Minute, 10*time.Second, &ahora)
+
+	b.Allow()
+	b.RecordFailure()
+	ahora = ahora.Add(11 * time.Second)
+	b.Allow()
+	b.RecordSuccess()
+
+	if got := b.State(); got != "closed" {
+		t.Fatalf("esperaba \"closed\" tras una prueba exitosa, obtuvo %q", got)
+	}
+}
