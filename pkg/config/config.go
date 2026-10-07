@@ -19,6 +19,7 @@ type Config struct {
 	IdentityInternalURL   string
 	IdentityTimeoutMS     int
 	IdentityHPKEPublicKey string
+	IAHPKEPublicKey       string
 	MockDNRPAOwnerDNI     string
 	InternalServiceToken  string
 	EphemeralDB           bool
@@ -45,6 +46,7 @@ func Load() (*Config, error) {
 		PatHMACSecret:         os.Getenv("PAT_HMAC_SECRET"),
 		IdentityInternalURL:   os.Getenv("IDENTITY_INTERNAL_URL"),
 		IdentityHPKEPublicKey: os.Getenv("IDENTITY_HPKE_PUBLIC_KEY"),
+		IAHPKEPublicKey:       os.Getenv("IA_HPKE_PUBLIC_KEY"),
 		MockDNRPAOwnerDNI:     os.Getenv("MOCK_DNRPA_OWNER_DNI"),
 		InternalServiceToken:  os.Getenv("INTERNAL_SERVICE_TOKEN"),
 	}
@@ -130,6 +132,9 @@ func Load() (*Config, error) {
 	}
 	if cfg.IdentityHPKEPublicKey == "" {
 		return nil, fmt.Errorf("config: IDENTITY_HPKE_PUBLIC_KEY es obligatoria")
+	}
+	if cfg.IAHPKEPublicKey == "" {
+		return nil, fmt.Errorf("config: IA_HPKE_PUBLIC_KEY es obligatoria")
 	}
 	if cfg.MockDNRPAOwnerDNI == "" {
 		return nil, fmt.Errorf("config: MOCK_DNRPA_OWNER_DNI es obligatoria")

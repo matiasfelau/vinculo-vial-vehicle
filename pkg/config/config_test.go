@@ -15,6 +15,7 @@ func setEnvCompleto(t *testing.T) {
 		"PAT_AES_KEY":              "clave-de-prueba",
 		"PAT_HMAC_SECRET":          "clave-de-prueba",
 		"IDENTITY_HPKE_PUBLIC_KEY": "clave-de-prueba",
+		"IA_HPKE_PUBLIC_KEY":       "clave-de-prueba-ia",
 		"MOCK_DNRPA_OWNER_DNI":     "12345678",
 		"INTERNAL_SERVICE_TOKEN":   "token-de-prueba",
 	}
@@ -54,6 +55,9 @@ func TestLoadConConfiguracionCompleta(t *testing.T) {
 	}
 	if cfg.DBQueryTimeout != 1500*time.Millisecond {
 		t.Errorf("esperaba timeout de consulta por defecto de 1500ms, obtuvo %v", cfg.DBQueryTimeout)
+	}
+	if cfg.IAHPKEPublicKey != "clave-de-prueba-ia" {
+		t.Errorf("esperaba IA_HPKE_PUBLIC_KEY cargada, obtuvo %q", cfg.IAHPKEPublicKey)
 	}
 }
 
@@ -170,6 +174,7 @@ func TestLoadFallaSinVariablesObligatorias(t *testing.T) {
 		"PAT_AES_KEY",
 		"PAT_HMAC_SECRET",
 		"IDENTITY_HPKE_PUBLIC_KEY",
+		"IA_HPKE_PUBLIC_KEY",
 		"MOCK_DNRPA_OWNER_DNI",
 		"INTERNAL_SERVICE_TOKEN",
 	}

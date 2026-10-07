@@ -17,23 +17,36 @@ type PlateDecryptor interface {
 	Decrypt(ciphertextBase64 string) ([]byte, error)
 }
 
-// resolvePatHash desencripta, normaliza, valida y calcula el Blind Index de
-// pat_enc: la secuencia común a CheckVehicleService y ResolveOwnersService.
-// La patente en claro y su forma normalizada se purgan antes de retornar, en
-// todos los caminos, incluidos los de error.
-func resolvePatHash(decryptor PlateDecryptor, hmacSecret []byte, patEnc string) (string, error) {
+// canonicalPlate desencripta pat_enc y retorna la patente canónica: normalizada y
+// con formato válido. Es la forma única que usan tanto el Blind Index como el
+// recifrado hacia otros servicios. La patente en claro recién desencriptada se
+// purga antes de retornar, en todos los caminos; la canónica la purga el llamador
+// (secure.Wipe) cuando termina de usarla. Ante error no retorna ninguna patente.
+func canonicalPlate(decryptor PlateDecryptor, patEnc string) ([]byte, error) {
 	plate, err := decryptor.Decrypt(patEnc)
 	if err != nil {
-		return "", fmt.Errorf("%w: %v", domain.ErrInvalidCryptogram, err)
+		return nil, fmt.Errorf("%w: %v", domain.ErrInvalidCryptogram, err)
 	}
 	defer secure.Wipe(plate)
 
 	normalized := validation.NormalizePlate(plate)
-	defer secure.Wipe(normalized)
-
 	if err := validation.ValidatePlate(normalized); err != nil {
+		secure.Wipe(normalized)
+		return nil, err
+	}
+
+	return normalized, nil
+}
+
+// resolvePatHash obtiene la patente canónica de pat_enc y calcula su Blind Index:
+// la secuencia común a CheckVehicleService y ResolveOwnersService. La patente se
+// purga antes de retornar, en todos los caminos, incluidos los de error.
+func resolvePatHash(decryptor PlateDecryptor, hmacSecret []byte, patEnc string) (string, error) {
+	normalized, err := canonicalPlate(decryptor, patEnc)
+	if err != nil {
 		return "", err
 	}
+	defer secure.Wipe(normalized)
 
 	return blindindex.Compute(hmacSecret, normalized), nil
 }
