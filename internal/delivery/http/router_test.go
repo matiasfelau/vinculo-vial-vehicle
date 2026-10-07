@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/gin-gonic/gin"
@@ -11,7 +12,7 @@ import (
 
 func TestHealthCheck(t *testing.T) {
 	gin.SetMode(gin.TestMode)
-	router := NewRouter(&fakeRegisterVehicleUseCase{}, &fakeCheckVehicleUseCase{}, &fakePingable{}, &fakeCircuitReporter{estado: "closed"})
+	router := NewRouter(&fakeRegisterVehicleUseCase{}, &fakePingable{}, &fakeCircuitReporter{estado: "closed"})
 
 	req := httptest.NewRequest(http.MethodGet, "/health", nil)
 	rec := httptest.NewRecorder()
@@ -25,7 +26,7 @@ func TestHealthCheck(t *testing.T) {
 
 func TestReadyCheckOk(t *testing.T) {
 	gin.SetMode(gin.TestMode)
-	router := NewRouter(&fakeRegisterVehicleUseCase{}, &fakeCheckVehicleUseCase{}, &fakePingable{err: nil}, &fakeCircuitReporter{estado: "closed"})
+	router := NewRouter(&fakeRegisterVehicleUseCase{}, &fakePingable{err: nil}, &fakeCircuitReporter{estado: "closed"})
 
 	req := httptest.NewRequest(http.MethodGet, "/ready", nil)
 	rec := httptest.NewRecorder()
@@ -39,7 +40,7 @@ func TestReadyCheckOk(t *testing.T) {
 
 func TestReadyCheckError(t *testing.T) {
 	gin.SetMode(gin.TestMode)
-	router := NewRouter(&fakeRegisterVehicleUseCase{}, &fakeCheckVehicleUseCase{}, &fakePingable{err: context.DeadlineExceeded}, &fakeCircuitReporter{estado: "closed"})
+	router := NewRouter(&fakeRegisterVehicleUseCase{}, &fakePingable{err: context.DeadlineExceeded}, &fakeCircuitReporter{estado: "closed"})
 
 	req := httptest.NewRequest(http.MethodGet, "/ready", nil)
 	rec := httptest.NewRecorder()
@@ -57,4 +58,20 @@ type fakePingable struct {
 
 func (f *fakePingable) Ping(ctx context.Context) error {
 	return f.err
+}
+
+// El check público de existencia de patentes se eliminó (US-08): es un oráculo que
+// ahora resuelve Alert a través de /internal/resolve-owner.
+func TestRouterNoExponeElCheckPublicoDePatentes(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	router := NewRouter(&fakeRegisterVehicleUseCase{}, &fakePingable{}, &fakeCircuitReporter{estado: "closed"})
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/vehicles/check", strings.NewReader(`{"pat_enc":"criptograma"}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("esperaba 404, obtuvo %d", rec.Code)
+	}
 }
