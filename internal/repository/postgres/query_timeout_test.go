@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/matiasfelau/vinculo-vial-vehicle/internal/domain"
 )
 
@@ -32,11 +33,11 @@ func TestConsultaQueExcedeElPlazoSeClasificaComoIndisponibilidad(t *testing.T) {
 	}
 }
 
-// TestExistsByPatHashCortaAntesDeQueElLockSeLibere retiene un lock exclusivo
+// TestFindOwnersOrReservePendingCortaAntesDeQueElLockSeLibere retiene un lock exclusivo
 // sobre vehicles desde una segunda conexión, sin liberarlo, para verificar que
-// el plazo por consulta de WithQueryTimeout corta ExistsByPatHash en lugar de
+// el plazo por consulta de WithQueryTimeout corta FindOwnersOrReservePending en lugar de
 // esperar indefinidamente a que el lock se libere.
-func TestExistsByPatHashCortaAntesDeQueElLockSeLibere(t *testing.T) {
+func TestFindOwnersOrReservePendingCortaAntesDeQueElLockSeLibere(t *testing.T) {
 	db := setupTestDB(t)
 
 	sqlDB, err := db.DB()
@@ -63,7 +64,7 @@ func TestExistsByPatHashCortaAntesDeQueElLockSeLibere(t *testing.T) {
 	repo := NewVehicleRepository(db, WithQueryTimeout(50*time.Millisecond))
 
 	inicio := time.Now()
-	_, err = repo.ExistsByPatHash(context.Background(), "no-importa")
+	_, _, err = repo.FindOwnersOrReservePending(context.Background(), "no-importa", domain.PendingProposal{Ref: uuid.New(), Now: time.Now().UTC(), ExpiresAt: time.Now().UTC().Add(time.Hour)})
 	transcurrido := time.Since(inicio)
 
 	if !errors.Is(err, domain.ErrRepositoryUnavailable) {

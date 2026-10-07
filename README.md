@@ -14,6 +14,19 @@ Identity antes de persistir la vinculación.
   `vinculo-vial-identity` por red interna.
 - Desencriptar, validar, calcular el Blind Index y cifrar la patente en reposo.
 - Persistir la vinculación `(owner_id, patente)` respetando la regla de unicidad compuesta.
+- No expone ninguna consulta pública de existencia de patentes. Quien necesita saber si una
+  patente está registrada (Alert, al recibir un intento de alerta) lo pregunta por
+  `/internal/resolve-owner`, en la red interna.
+
+## Endpoints públicos
+
+| Método y path | Descripción |
+|---|---|
+| `POST /api/v1/vehicles` | Alta de la vinculación `(owner_id, patente)`. |
+| `GET /health`, `GET /ready`, `GET /health/deps` | Salud del servicio y de sus dependencias. |
+
+`POST /api/v1/vehicles/check` se eliminó en US-08: era un oráculo público de existencia de
+patentes. Responde 404.
 
 ## Arquitectura
 
