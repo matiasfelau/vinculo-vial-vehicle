@@ -115,21 +115,6 @@ func (r *VehicleRepository) Create(ctx context.Context, vehicle *domain.Vehicle)
 	return nil
 }
 
-// ExistsByPatHash indica si existe al menos un vehículo con ese Blind Index.
-func (r *VehicleRepository) ExistsByPatHash(ctx context.Context, patHashed string) (bool, error) {
-	ctx, cancel := context.WithTimeout(ctx, r.queryTimeout)
-	defer cancel()
-
-	var exists bool
-	err := r.db.WithContext(ctx).
-		Raw("SELECT EXISTS(SELECT 1 FROM vehicles WHERE pat_hashed = ?)", patHashed).
-		Scan(&exists).Error
-	if err != nil {
-		return false, classifyError(err)
-	}
-	return exists, nil
-}
-
 // FindOwnersByPatHash retorna todos los owner_id vinculados a ese Blind Index.
 // Un resultado vacío es válido: significa que la patente no está en la red.
 func (r *VehicleRepository) FindOwnersByPatHash(ctx context.Context, patHashed string) ([]uuid.UUID, error) {

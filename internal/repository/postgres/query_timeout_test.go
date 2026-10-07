@@ -32,11 +32,11 @@ func TestConsultaQueExcedeElPlazoSeClasificaComoIndisponibilidad(t *testing.T) {
 	}
 }
 
-// TestExistsByPatHashCortaAntesDeQueElLockSeLibere retiene un lock exclusivo
+// TestFindOwnersByPatHashCortaAntesDeQueElLockSeLibere retiene un lock exclusivo
 // sobre vehicles desde una segunda conexión, sin liberarlo, para verificar que
-// el plazo por consulta de WithQueryTimeout corta ExistsByPatHash en lugar de
+// el plazo por consulta de WithQueryTimeout corta FindOwnersByPatHash en lugar de
 // esperar indefinidamente a que el lock se libere.
-func TestExistsByPatHashCortaAntesDeQueElLockSeLibere(t *testing.T) {
+func TestFindOwnersByPatHashCortaAntesDeQueElLockSeLibere(t *testing.T) {
 	db := setupTestDB(t)
 
 	sqlDB, err := db.DB()
@@ -63,7 +63,7 @@ func TestExistsByPatHashCortaAntesDeQueElLockSeLibere(t *testing.T) {
 	repo := NewVehicleRepository(db, WithQueryTimeout(50*time.Millisecond))
 
 	inicio := time.Now()
-	_, err = repo.ExistsByPatHash(context.Background(), "no-importa")
+	_, err = repo.FindOwnersByPatHash(context.Background(), "no-importa")
 	transcurrido := time.Since(inicio)
 
 	if !errors.Is(err, domain.ErrRepositoryUnavailable) {
