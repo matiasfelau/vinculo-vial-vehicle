@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"log"
 	"net/http"
 	"os"
@@ -35,6 +36,23 @@ const (
 	shutdownTimeout       = 10 * time.Second
 )
 
+// newEncryptors construye los dos cifradores HPKE de salida, cada uno con la
+// clave pública de su destinatario: dni hacia Identity (IDENTITY_HPKE_PUBLIC_KEY)
+// y plate hacia IA (IA_HPKE_PUBLIC_KEY). Una clave inválida hace fallar el arranque.
+func newEncryptors(cfg *config.Config) (dni, plate *hpke.Encryptor, err error) {
+	dni, err = hpke.NewEncryptor(cfg.IdentityHPKEPublicKey)
+	if err != nil {
+		return nil, nil, fmt.Errorf("cifrador hacia identity: %w", err)
+	}
+
+	plate, err = hpke.NewEncryptor(cfg.IAHPKEPublicKey)
+	if err != nil {
+		return nil, nil, fmt.Errorf("cifrador hacia ia: %w", err)
+	}
+
+	return dni, plate, nil
+}
+
 func main() {
 	cfg, err := config.Load()
 	if err != nil {
@@ -46,9 +64,9 @@ func main() {
 		log.Fatalf("no se pudo inicializar el desencriptador HPKE: %v", err)
 	}
 
-	dniEncryptor, err := hpke.NewEncryptor(cfg.IdentityHPKEPublicKey)
+	dniEncryptor, plateEncryptor, err := newEncryptors(cfg)
 	if err != nil {
-		log.Fatalf("no se pudo inicializar el cifrador HPKE hacia identity: %v", err)
+		log.Fatalf("no se pudieron inicializar los cifradores HPKE: %v", err)
 	}
 
 	plateCipher, err := symmetric.NewCipher(cfg.PatAESKey)
@@ -88,7 +106,7 @@ func main() {
 	)
 
 	checkVehicleService := lookup.NewCheckVehicleService(repository, payloadDecryptor, []byte(cfg.PatHMACSecret))
-	resolveOwnersService := lookup.NewResolveOwnersService(repository, payloadDecryptor, []byte(cfg.PatHMACSecret))
+	resolveOwnersService := lookup.NewResolveOwnersService(repository, payloadDecryptor, plateEncryptor, []byte(cfg.PatHMACSecret))
 
 	router := httpdelivery.NewRouter(registerVehicleService, checkVehicleService, repository, identityVerifier)
 	internalRouter := httpdelivery.NewInternalRouter(cfg.InternalServiceToken, resolveOwnersService)
