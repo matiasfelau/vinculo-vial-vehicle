@@ -21,7 +21,7 @@ func getDepsHealth(t *testing.T, estado string) (int, map[string]any) {
 	t.Helper()
 
 	gin.SetMode(gin.TestMode)
-	router := NewRouter(&fakeRegisterVehicleUseCase{}, &fakeCheckVehicleUseCase{}, &fakePingable{}, &fakeCircuitReporter{estado: estado})
+	router := NewRouter(&fakeRegisterVehicleUseCase{}, &fakePingable{}, &fakeCircuitReporter{estado: estado})
 
 	rec := httptest.NewRecorder()
 	router.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/health/deps", nil))
@@ -88,7 +88,7 @@ func TestDepsHealthNoAfectaReady(t *testing.T) {
 	// Un circuito abierto hacia identity no debe sacar a la instancia del
 	// balanceo: /ready depende solo de la base propia.
 	gin.SetMode(gin.TestMode)
-	router := NewRouter(&fakeRegisterVehicleUseCase{}, &fakeCheckVehicleUseCase{}, &fakePingable{err: nil}, &fakeCircuitReporter{estado: "open"})
+	router := NewRouter(&fakeRegisterVehicleUseCase{}, &fakePingable{err: nil}, &fakeCircuitReporter{estado: "open"})
 
 	rec := httptest.NewRecorder()
 	router.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/ready", nil))
