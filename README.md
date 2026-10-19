@@ -42,6 +42,25 @@ integran únicamente en las capas de infraestructura (`repository`, `delivery`, 
 
 Ver [.env.example](.env.example) para el detalle de las variables de entorno requeridas.
 
+## Endpoint interno: resolución del dueño
+
+`POST /internal/resolve-owner` lo consume solo `vinculo-vial-alert`, por la red
+`vinculo-vial` y con el header `X-Internal-Service-Token`. Nunca se expone en Kong.
+
+```
+req:  { "pat_enc": "<base64>", "alert_id": "uuid" }
+res:  200 { "owner_ids": ["uuid", ...], "pat_enc_ia": "<base64>" }
+      400 criptograma, formato de patente o alert_id inválidos · 503 base no disponible
+```
+
+- `pat_enc_ia` es la patente canónica cifrada con HPKE hacia `IA_HPKE_PUBLIC_KEY`, con
+  `info = alert_id`. Se devuelve **siempre**, también cuando `owner_ids` está vacío
+  (US-10): el emisor nunca se entera de si la patente tiene dueños, e IA valida la
+  alerta igual.
+- `owner_ids` vacío (`[]`, nunca `null`) es un resultado válido, no un error.
+- La patente en claro se purga de memoria en todos los caminos. Ni la patente, ni
+  `pat_enc`, ni `pat_enc_ia`, ni el Blind Index se loguean.
+
 ## Comandos
 
 ```

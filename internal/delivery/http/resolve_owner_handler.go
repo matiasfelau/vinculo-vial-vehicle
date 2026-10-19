@@ -24,11 +24,11 @@ type resolveOwnerRequest struct {
 	AlertID string `json:"alert_id" binding:"required"`
 }
 
-// resolveOwnerResponse es la respuesta de /internal/resolve-owner. PatEncIA se
-// omite cuando owner_ids está vacío: sin dueños no hay nada que cifrar hacia IA.
+// resolveOwnerResponse es la respuesta de /internal/resolve-owner. PatEncIA va
+// siempre, también cuando owner_ids está vacío: IA valida la patente igual.
 type resolveOwnerResponse struct {
 	OwnerIDs []uuid.UUID `json:"owner_ids"`
-	PatEncIA string      `json:"pat_enc_ia,omitempty"`
+	PatEncIA string      `json:"pat_enc_ia"`
 }
 
 // ResolveOwnerHandler expone POST /internal/resolve-owner sobre el router
@@ -37,9 +37,8 @@ type resolveOwnerResponse struct {
 // 401 por su cuenta, ni aplica ninguna regla de negocio sobre quién pregunta.
 //
 // El request exige pat_enc y alert_id (UUID). La respuesta es siempre
-// {owner_ids: [...], pat_enc_ia: "..."}, con un array vacío (nunca null) y sin
-// pat_enc_ia cuando la patente no está en la red: es un resultado válido, no un
-// error.
+// {owner_ids: [...], pat_enc_ia: "..."}, con un array vacío (nunca null) cuando
+// la patente no está en la red: es un resultado válido, no un error.
 func ResolveOwnerHandler(useCase resolveOwnersUseCase) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		var req resolveOwnerRequest

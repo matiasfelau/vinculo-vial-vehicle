@@ -45,10 +45,11 @@ func NewResolveOwnersService(repository domain.VehicleRepository, decryptor Plat
 // esa patente (relación 1 patente -> N dueños), junto con pat_enc_ia: la patente
 // canónica cifrada con HPKE hacia IA, con info = alertID, en base64 de enc‖ct.
 //
-// Un slice vacío es un resultado válido, no un error: significa que la patente
-// no está en la red, y así debe tratarlo el llamador; en ese caso no se cifra y
-// patEncIA es "". Un error de cifrado es un error interno y nunca devuelve una
-// respuesta parcial. La patente se purga de memoria en todos los caminos.
+// pat_enc_ia se genera siempre, también sin dueños (US-10): el emisor nunca se
+// entera de si el vehículo está en la red, así que IA valida la patente de la
+// misma forma en ambos casos. Un slice vacío es un resultado válido, no un
+// error. Un error de cifrado es un error interno y nunca devuelve una respuesta
+// parcial. La patente se purga de memoria en todos los caminos.
 func (s *ResolveOwnersService) ResolveOwners(ctx context.Context, patEnc string, alertID uuid.UUID) ([]uuid.UUID, string, error) {
 	plate, err := canonicalPlate(s.decryptor, patEnc)
 	if err != nil {
@@ -59,9 +60,6 @@ func (s *ResolveOwnersService) ResolveOwners(ctx context.Context, patEnc string,
 	ownerIDs, err := s.repository.FindOwnersByPatHash(ctx, blindindex.Compute(s.hmacSecret, plate))
 	if err != nil {
 		return nil, "", err
-	}
-	if len(ownerIDs) == 0 {
-		return ownerIDs, "", nil
 	}
 
 	sealed, err := s.encryptor.EncryptWithInfo(plate, []byte(alertID.String()))
