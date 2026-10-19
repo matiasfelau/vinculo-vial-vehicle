@@ -91,6 +91,11 @@ func NewVehicleRepository(db *gorm.DB, opts ...Option) *VehicleRepository {
 
 // Create persiste el vehículo. Ante la violación de UNIQUE(owner_id, pat_hashed)
 // retorna domain.ErrDuplicateVehicle.
+//
+// Si la patente tenía una reserva pendiente vigente (US-10), es decir, este es el
+// primer dueño de una patente con alertas esperando, la misma transacción borra
+// la reserva y encola vehicle.pending.claimed en el outbox: el vehículo, el
+// borrado y el evento se confirman juntos o ninguno.
 func (r *VehicleRepository) Create(ctx context.Context, vehicle *domain.Vehicle) error {
 	ctx, cancel := context.WithTimeout(ctx, r.queryTimeout)
 	defer cancel()
@@ -103,7 +108,16 @@ func (r *VehicleRepository) Create(ctx context.Context, vehicle *domain.Vehicle)
 		CreatedAt: vehicle.CreatedAt,
 	}
 
-	if err := r.db.WithContext(ctx).Create(&model).Error; err != nil {
+	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := lockPlate(tx, vehicle.PatHashed); err != nil {
+			return err
+		}
+		if err := tx.Create(&model).Error; err != nil {
+			return err
+		}
+		return claimPending(tx, vehicle)
+	})
+	if err != nil {
 		var pgErr *pgconn.PgError
 		if errors.As(err, &pgErr) && pgErr.Code == uniqueViolationCode {
 			return domain.ErrDuplicateVehicle
