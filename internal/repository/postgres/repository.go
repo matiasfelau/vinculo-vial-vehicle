@@ -6,7 +6,6 @@ import (
 	"net"
 	"time"
 
-	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgconn"
 	"gorm.io/gorm"
 
@@ -128,23 +127,6 @@ func (r *VehicleRepository) ExistsByPatHash(ctx context.Context, patHashed strin
 		return false, classifyError(err)
 	}
 	return exists, nil
-}
-
-// FindOwnersByPatHash retorna todos los owner_id vinculados a ese Blind Index.
-// Un resultado vacío es válido: significa que la patente no está en la red.
-func (r *VehicleRepository) FindOwnersByPatHash(ctx context.Context, patHashed string) ([]uuid.UUID, error) {
-	ctx, cancel := context.WithTimeout(ctx, r.queryTimeout)
-	defer cancel()
-
-	var ownerIDs []uuid.UUID
-	err := r.db.WithContext(ctx).
-		Model(&vehicleModel{}).
-		Where("pat_hashed = ?", patHashed).
-		Pluck("owner_id", &ownerIDs).Error
-	if err != nil {
-		return nil, classifyError(err)
-	}
-	return ownerIDs, nil
 }
 
 // Ping verifica la conectividad con la base de datos.

@@ -8,6 +8,10 @@ import (
 	"time"
 )
 
+// defaultPendingDeliveryHours es la ventana de entrega de alertas pendientes
+// (US-10) cuando PENDING_DELIVERY_HOURS no está definida.
+const defaultPendingDeliveryHours = "24"
+
 // Config agrupa los parámetros de configuración requeridos por el servicio.
 type Config struct {
 	Port                  string
@@ -32,6 +36,13 @@ type Config struct {
 	// DBQueryTimeout acota cada consulta contra la base de datos propia (ver
 	// internal/repository/postgres.WithQueryTimeout).
 	DBQueryTimeout time.Duration
+
+	// PendingDeliveryTTL es PENDING_DELIVERY_HOURS (US-10): cuánto conserva Vehicle
+	// la reserva de una patente sin dueños, contado desde la última alerta.
+	PendingDeliveryTTL time.Duration
+
+	// SweeperInterval es cada cuánto corre el sweeper de patentes pendientes vencidas.
+	SweeperInterval time.Duration
 }
 
 // Load construye la configuración a partir de las variables de entorno del proceso.
@@ -114,6 +125,25 @@ func Load() (*Config, error) {
 		return nil, err
 	}
 	cfg.DBQueryTimeout = dbQueryTimeoutMS
+
+	pendingHoursRaw := os.Getenv("PENDING_DELIVERY_HOURS")
+	if pendingHoursRaw == "" {
+		pendingHoursRaw = defaultPendingDeliveryHours
+	}
+	pendingHours, err := strconv.Atoi(pendingHoursRaw)
+	if err != nil {
+		return nil, fmt.Errorf("config: PENDING_DELIVERY_HOURS inválido: %w", err)
+	}
+	if pendingHours <= 0 {
+		return nil, fmt.Errorf("config: PENDING_DELIVERY_HOURS debe ser mayor a cero")
+	}
+	cfg.PendingDeliveryTTL = time.Duration(pendingHours) * time.Hour
+
+	sweeperInterval, err := parsePositiveMillis("SWEEPER_INTERVAL_MS", "60000")
+	if err != nil {
+		return nil, err
+	}
+	cfg.SweeperInterval = sweeperInterval
 
 	if cfg.DatabaseURL == "" {
 		return nil, fmt.Errorf("config: DATABASE_URL es obligatoria")
