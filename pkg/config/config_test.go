@@ -18,6 +18,7 @@ func setEnvCompleto(t *testing.T) {
 		"IA_HPKE_PUBLIC_KEY":       "clave-de-prueba-ia",
 		"MOCK_DNRPA_OWNER_DNI":     "12345678",
 		"INTERNAL_SERVICE_TOKEN":   "token-de-prueba",
+		"RABBITMQ_URL":             "amqp://guest:guest@localhost:5672/",
 	}
 
 	for k, v := range vars {
@@ -231,6 +232,57 @@ func TestLoadSweeperIntervalInvalidoFalla(t *testing.T) {
 
 			if _, err := Load(); err == nil {
 				t.Fatalf("SWEEPER_INTERVAL_MS=%q debía fallar el arranque", valor)
+			}
+		})
+	}
+}
+
+func TestLoadRabbitMQPorDefecto(t *testing.T) {
+	setEnvCompleto(t)
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("no se esperaba error: %v", err)
+	}
+	if cfg.RabbitMQURL != "amqp://guest:guest@localhost:5672/" {
+		t.Errorf("RABBITMQ_URL no cargada: %q", cfg.RabbitMQURL)
+	}
+	if cfg.RabbitMQExchange != "vvi.topic.exchange" {
+		t.Errorf("esperaba exchange por defecto vvi.topic.exchange, obtuvo %q", cfg.RabbitMQExchange)
+	}
+	if cfg.RabbitMQPublishTimeout != 2*time.Second {
+		t.Errorf("esperaba timeout de publicación por defecto de 2s, obtuvo %v", cfg.RabbitMQPublishTimeout)
+	}
+	if cfg.OutboxWorkerInterval != 2*time.Second {
+		t.Errorf("esperaba intervalo del worker por defecto de 2s, obtuvo %v", cfg.OutboxWorkerInterval)
+	}
+	if cfg.OutboxWorkerBatchSize != 20 {
+		t.Errorf("esperaba lote por defecto de 20, obtuvo %d", cfg.OutboxWorkerBatchSize)
+	}
+}
+
+func TestLoadSinRabbitMQURLFalla(t *testing.T) {
+	setEnvCompleto(t)
+	t.Setenv("RABBITMQ_URL", "")
+
+	if _, err := Load(); err == nil {
+		t.Fatal("RABBITMQ_URL es obligatoria: el arranque debía fallar")
+	}
+}
+
+func TestLoadParametrosDeRabbitMQInvalidosFallan(t *testing.T) {
+	casos := map[string]string{
+		"RABBITMQ_PUBLISH_TIMEOUT_MS": "0",
+		"OUTBOX_WORKER_INTERVAL_MS":   "abc",
+		"OUTBOX_WORKER_BATCH_SIZE":    "0",
+	}
+	for nombre, valor := range casos {
+		t.Run(nombre, func(t *testing.T) {
+			setEnvCompleto(t)
+			t.Setenv(nombre, valor)
+
+			if _, err := Load(); err == nil {
+				t.Fatalf("%s=%q debía fallar el arranque", nombre, valor)
 			}
 		})
 	}

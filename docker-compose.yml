@@ -1,6 +1,9 @@
 services:
   vinculo-vial-vehicle:
     container_name: vinculo-vial-vehicle
+    # Mayor que shutdownTimeout (10 s, drenado HTTP) más el tiempo que se espera
+    # al lote en curso del worker de outbox (5 s): si no, SIGKILL llega antes.
+    stop_grace_period: 20s
     build:
       context: .
       dockerfile: Dockerfile
@@ -29,6 +32,11 @@ services:
       EPHEMERAL_DB: ${EPHEMERAL_DB:-false}
       PENDING_DELIVERY_HOURS: ${PENDING_DELIVERY_HOURS:-24}
       SWEEPER_INTERVAL_MS: ${SWEEPER_INTERVAL_MS:-60000}
+      RABBITMQ_URL: ${RABBITMQ_URL:-amqp://guest:guest@vinculo-vial-rabbitmq:5672/}
+      RABBITMQ_EXCHANGE: ${RABBITMQ_EXCHANGE:-vvi.topic.exchange}
+      RABBITMQ_PUBLISH_TIMEOUT_MS: ${RABBITMQ_PUBLISH_TIMEOUT_MS:-2000}
+      OUTBOX_WORKER_INTERVAL_MS: ${OUTBOX_WORKER_INTERVAL_MS:-2000}
+      OUTBOX_WORKER_BATCH_SIZE: ${OUTBOX_WORKER_BATCH_SIZE:-20}
     networks:
       - vinculo-vial
       - vehicle-internal

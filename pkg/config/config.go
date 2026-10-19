@@ -12,6 +12,9 @@ import (
 // (US-10) cuando PENDING_DELIVERY_HOURS no está definida.
 const defaultPendingDeliveryHours = "24"
 
+// defaultRabbitMQExchange es el exchange topic de la plataforma.
+const defaultRabbitMQExchange = "vvi.topic.exchange"
+
 // Config agrupa los parámetros de configuración requeridos por el servicio.
 type Config struct {
 	Port                  string
@@ -43,6 +46,19 @@ type Config struct {
 
 	// SweeperInterval es cada cuánto corre el sweeper de patentes pendientes vencidas.
 	SweeperInterval time.Duration
+
+	// RabbitMQURL y RabbitMQExchange identifican el broker y el exchange topic donde
+	// se publican los eventos. El exchange lo declara vinculo-vial-core.
+	RabbitMQURL      string
+	RabbitMQExchange string
+
+	// RabbitMQPublishTimeout acota cada publicación, incluida la espera del confirm.
+	RabbitMQPublishTimeout time.Duration
+
+	// OutboxWorkerInterval y OutboxWorkerBatchSize gobiernan el worker que publica
+	// el outbox: cada cuánto revisa los pendientes y cuántos intenta por ciclo.
+	OutboxWorkerInterval  time.Duration
+	OutboxWorkerBatchSize int
 }
 
 // Load construye la configuración a partir de las variables de entorno del proceso.
@@ -60,6 +76,8 @@ func Load() (*Config, error) {
 		IAHPKEPublicKey:       os.Getenv("IA_HPKE_PUBLIC_KEY"),
 		MockDNRPAOwnerDNI:     os.Getenv("MOCK_DNRPA_OWNER_DNI"),
 		InternalServiceToken:  os.Getenv("INTERNAL_SERVICE_TOKEN"),
+		RabbitMQURL:           os.Getenv("RABBITMQ_URL"),
+		RabbitMQExchange:      os.Getenv("RABBITMQ_EXCHANGE"),
 	}
 
 	if cfg.Port == "" {
@@ -145,6 +163,35 @@ func Load() (*Config, error) {
 	}
 	cfg.SweeperInterval = sweeperInterval
 
+	if cfg.RabbitMQExchange == "" {
+		cfg.RabbitMQExchange = defaultRabbitMQExchange
+	}
+
+	publishTimeout, err := parsePositiveMillis("RABBITMQ_PUBLISH_TIMEOUT_MS", "2000")
+	if err != nil {
+		return nil, err
+	}
+	cfg.RabbitMQPublishTimeout = publishTimeout
+
+	outboxInterval, err := parsePositiveMillis("OUTBOX_WORKER_INTERVAL_MS", "2000")
+	if err != nil {
+		return nil, err
+	}
+	cfg.OutboxWorkerInterval = outboxInterval
+
+	batchSizeRaw := os.Getenv("OUTBOX_WORKER_BATCH_SIZE")
+	if batchSizeRaw == "" {
+		batchSizeRaw = "20"
+	}
+	batchSize, err := strconv.Atoi(batchSizeRaw)
+	if err != nil {
+		return nil, fmt.Errorf("config: OUTBOX_WORKER_BATCH_SIZE inválido: %w", err)
+	}
+	if batchSize < 1 {
+		return nil, fmt.Errorf("config: OUTBOX_WORKER_BATCH_SIZE debe ser mayor o igual a 1")
+	}
+	cfg.OutboxWorkerBatchSize = batchSize
+
 	if cfg.DatabaseURL == "" {
 		return nil, fmt.Errorf("config: DATABASE_URL es obligatoria")
 	}
@@ -165,6 +212,9 @@ func Load() (*Config, error) {
 	}
 	if cfg.IAHPKEPublicKey == "" {
 		return nil, fmt.Errorf("config: IA_HPKE_PUBLIC_KEY es obligatoria")
+	}
+	if cfg.RabbitMQURL == "" {
+		return nil, fmt.Errorf("config: RABBITMQ_URL es obligatoria")
 	}
 	if cfg.MockDNRPAOwnerDNI == "" {
 		return nil, fmt.Errorf("config: MOCK_DNRPA_OWNER_DNI es obligatoria")
