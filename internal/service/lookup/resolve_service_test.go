@@ -205,13 +205,14 @@ func TestResolveOwnersCadaLlamadaProduceUnCriptogramaNuevo(t *testing.T) {
 	}
 }
 
-func TestResolveOwnersPatenteInexistenteRetornaArrayVacioSinPatEncIA(t *testing.T) {
+func TestResolveOwnersPatenteSinDuenosRetornaArrayVacioYPatEncIA(t *testing.T) {
+	iaPublic, iaPrivate := newKeyPair(t)
+	alertID := uuid.New()
 	repo := &fakeRepository{owners: []uuid.UUID{}}
-	decryptor := &fakePlateDecryptor{plate: []byte("AA000AA")}
-	encryptor := &fakePlateEncryptor{}
-	service := NewResolveOwnersService(repo, decryptor, encryptor, []byte("secreto"))
+	decryptor := &fakePlateDecryptor{plate: []byte("ab-123 cd")}
+	service := NewResolveOwnersService(repo, decryptor, newRealEncryptor(t, iaPublic), []byte("secreto"))
 
-	result, patEncIA, err := service.ResolveOwners(context.Background(), "criptograma", uuid.New())
+	result, patEncIA, err := service.ResolveOwners(context.Background(), "criptograma", alertID)
 
 	if err != nil {
 		t.Fatalf("un array vacío es un resultado válido, no un error: %v", err)
@@ -219,11 +220,15 @@ func TestResolveOwnersPatenteInexistenteRetornaArrayVacioSinPatEncIA(t *testing.
 	if len(result) != 0 {
 		t.Fatalf("esperaba un slice vacío, obtuvo %d elementos", len(result))
 	}
-	if patEncIA != "" {
-		t.Fatal("sin dueños no debía generarse pat_enc_ia")
+	if patEncIA == "" {
+		t.Fatal("sin dueños también debía generarse pat_enc_ia")
 	}
-	if encryptor.invocado {
-		t.Fatal("sin dueños no debía invocarse el cifrador")
+	got, err := openWithInfo(iaPrivate, patEncIA, []byte(alertID.String()))
+	if err != nil {
+		t.Fatalf("pat_enc_ia debía descifrarse con la clave de IA y el alert_id: %v", err)
+	}
+	if string(got) != "AB123CD" {
+		t.Fatalf("pat_enc_ia descifró a %q, esperaba la patente canónica %q", got, "AB123CD")
 	}
 }
 
@@ -350,9 +355,27 @@ func TestResolveOwnersWipeaLaPatenteSinDuenos(t *testing.T) {
 	repo := &fakeRepository{owners: []uuid.UUID{}}
 	plate := []byte("AA000AA")
 	decryptor := &fakePlateDecryptor{plate: plate}
-	service := NewResolveOwnersService(repo, decryptor, &fakePlateEncryptor{}, []byte("secreto"))
+	encryptor := &fakePlateEncryptor{}
+	service := NewResolveOwnersService(repo, decryptor, encryptor, []byte("secreto"))
 
 	_, _, _ = service.ResolveOwners(context.Background(), "criptograma", uuid.New())
 
 	assertWiped(t, "la patente en claro", plate)
+	assertWiped(t, "la patente canónica", encryptor.plaintext)
+}
+
+func TestResolveOwnersSinDuenosErrorDeCifradoEsInternoYSinRespuestaParcial(t *testing.T) {
+	repo := &fakeRepository{owners: []uuid.UUID{}}
+	decryptor := &fakePlateDecryptor{plate: []byte("AA000AA")}
+	encryptor := &fakePlateEncryptor{err: errors.New("fallo de cifrado")}
+	service := NewResolveOwnersService(repo, decryptor, encryptor, []byte("secreto"))
+
+	result, patEncIA, err := service.ResolveOwners(context.Background(), "criptograma", uuid.New())
+
+	if err == nil {
+		t.Fatal("esperaba un error ante el fallo de cifrado")
+	}
+	if result != nil || patEncIA != "" {
+		t.Fatal("ante un error de cifrado no debía devolverse una respuesta parcial")
+	}
 }

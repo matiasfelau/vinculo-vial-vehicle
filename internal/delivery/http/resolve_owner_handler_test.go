@@ -84,7 +84,7 @@ func TestResolveOwnerPatenteConTresDuenosRetorna200ConLosTresUUIDs(t *testing.T)
 
 func TestResolveOwnerPatenteSinDuenosRetorna200ConArrayVacio(t *testing.T) {
 	gin.SetMode(gin.TestMode)
-	resolver := &fakeResolveOwnersUseCase{ownerIDs: nil}
+	resolver := &fakeResolveOwnersUseCase{ownerIDs: nil, patEncIA: "cifrado-para-ia"}
 	router := NewInternalRouter(secretoDePrueba, resolver)
 
 	rec := httptest.NewRecorder()
@@ -98,9 +98,9 @@ func TestResolveOwnerPatenteSinDuenosRetorna200ConArrayVacio(t *testing.T) {
 	if !bytes.Contains(rec.Body.Bytes(), []byte(`"owner_ids":[]`)) {
 		t.Fatalf("esperaba owner_ids como array vacío, obtuvo %s", rec.Body.String())
 	}
-	// Sin dueños no hay criptograma para IA: el campo se omite, no va vacío.
-	if bytes.Contains(rec.Body.Bytes(), []byte("pat_enc_ia")) {
-		t.Fatalf("pat_enc_ia debía omitirse sin dueños, obtuvo %s", rec.Body.String())
+	// IA valida la patente también cuando nadie la vinculó (US-10).
+	if !bytes.Contains(rec.Body.Bytes(), []byte(`"pat_enc_ia":"cifrado-para-ia"`)) {
+		t.Fatalf("pat_enc_ia debía ir también sin dueños, obtuvo %s", rec.Body.String())
 	}
 }
 
