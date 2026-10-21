@@ -81,9 +81,9 @@ func ResetSchema(db *gorm.DB) error {
 	return nil
 }
 
-// AutoMigrate crea o actualiza el esquema de la tabla vehicles.
+// AutoMigrate crea o actualiza el esquema de las tablas vehicles y pending_plates.
 func AutoMigrate(db *gorm.DB) error {
-	if err := db.AutoMigrate(&vehicleModel{}); err != nil {
+	if err := db.AutoMigrate(&vehicleModel{}, &pendingPlateModel{}); err != nil {
 		return fmt.Errorf("postgres: no se pudo migrar el esquema: %w", err)
 	}
 	return nil

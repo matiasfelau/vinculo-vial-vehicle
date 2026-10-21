@@ -26,6 +26,7 @@ integran únicamente en las capas de infraestructura (`repository`, `delivery`, 
 /cmd/api                    Punto de entrada del binario
 /internal/domain            Entidades e interfaces del dominio
 /internal/service/vehicle   Caso de uso de vinculación de vehículo
+/internal/service/sweeper   Borrado periódico de patentes pendientes vencidas
 /internal/repository/postgres  Persistencia (GORM/PostgreSQL)
 /internal/delivery/http     Handlers HTTP (Gin)
 /internal/client/identity   Cliente hacia el servicio Identity
@@ -49,7 +50,7 @@ Ver [.env.example](.env.example) para el detalle de las variables de entorno req
 
 ```
 req:  { "pat_enc": "<base64>", "alert_id": "uuid" }
-res:  200 { "owner_ids": ["uuid", ...], "pat_enc_ia": "<base64>" }
+res:  200 { "owner_ids": ["uuid", ...], "pat_enc_ia": "<base64>", "pending_ref": "uuid" }
       400 criptograma, formato de patente o alert_id inválidos · 503 base no disponible
 ```
 
@@ -58,8 +59,34 @@ res:  200 { "owner_ids": ["uuid", ...], "pat_enc_ia": "<base64>" }
   (US-10): el emisor nunca se entera de si la patente tiene dueños, e IA valida la
   alerta igual.
 - `owner_ids` vacío (`[]`, nunca `null`) es un resultado válido, no un error.
+- `pending_ref` solo se devuelve cuando `owner_ids` está vacío (ver "Patentes pendientes").
 - La patente en claro se purga de memoria en todos los caminos. Ni la patente, ni
   `pat_enc`, ni `pat_enc_ia`, ni el Blind Index se loguean.
+
+## Patentes pendientes de entrega (US-10)
+
+Cuando Alert resuelve una patente sin dueños, Vehicle la reserva en la tabla `pending_plates`
+para que el primer usuario que la vincule reciba las alertas de las últimas
+`PENDING_DELIVERY_HOURS` (24 h por defecto).
+
+| Columna | Contenido |
+|---|---|
+| `plate_hmac` | Blind Index de la patente (el mismo HMAC de `vehicles.pat_hashed`). Clave primaria: una fila por patente |
+| `pending_ref` | UUID opaco que Alert guarda junto a sus alertas. Único |
+| `expires_at` | `now + PENDING_DELIVERY_HOURS`; se extiende con cada alerta nueva a esa patente |
+| `created_at` | Alta de la reserva vigente |
+
+La tabla nunca guarda la patente en claro, ni identificadores de alertas ni de emisores.
+
+- **Sin dueños:** `resolve-owner` crea la fila o, si hay una vigente, reutiliza su `pending_ref` y
+  extiende `expires_at`. Una fila vencida que el sweeper todavía no borró no se reutiliza: se
+  emite un `pending_ref` nuevo.
+- **Con dueños** (incluso si el único es el propio emisor, que Vehicle no conoce): no hay
+  reserva. Alert descarta al emisor de `owner_ids`.
+- **Concurrencia:** la consulta de dueños y la reserva ocurren en una transacción bajo un
+  advisory lock por patente (`pg_advisory_xact_lock`), que también tomará la vinculación. Dos
+  `resolve-owner` simultáneos a la misma patente comparten un único `pending_ref`.
+- **Vencimiento:** un sweeper borra las filas vencidas cada `SWEEPER_INTERVAL_MS`.
 
 ## Comandos
 

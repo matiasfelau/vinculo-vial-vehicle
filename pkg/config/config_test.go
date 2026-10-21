@@ -56,6 +56,12 @@ func TestLoadConConfiguracionCompleta(t *testing.T) {
 	if cfg.DBQueryTimeout != 1500*time.Millisecond {
 		t.Errorf("esperaba timeout de consulta por defecto de 1500ms, obtuvo %v", cfg.DBQueryTimeout)
 	}
+	if cfg.PendingDeliveryTTL != 24*time.Hour {
+		t.Errorf("esperaba PENDING_DELIVERY_HOURS por defecto de 24h, obtuvo %v", cfg.PendingDeliveryTTL)
+	}
+	if cfg.SweeperInterval != time.Minute {
+		t.Errorf("esperaba SWEEPER_INTERVAL_MS por defecto de 60s, obtuvo %v", cfg.SweeperInterval)
+	}
 	if cfg.IAHPKEPublicKey != "clave-de-prueba-ia" {
 		t.Errorf("esperaba IA_HPKE_PUBLIC_KEY cargada, obtuvo %q", cfg.IAHPKEPublicKey)
 	}
@@ -186,6 +192,45 @@ func TestLoadFallaSinVariablesObligatorias(t *testing.T) {
 
 			if _, err := Load(); err == nil {
 				t.Fatalf("esperaba error al faltar %s", faltante)
+			}
+		})
+	}
+}
+
+func TestLoadPendingDeliveryHoursConfigurable(t *testing.T) {
+	setEnvCompleto(t)
+	t.Setenv("PENDING_DELIVERY_HOURS", "2")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("no se esperaba error: %v", err)
+	}
+	if cfg.PendingDeliveryTTL != 2*time.Hour {
+		t.Fatalf("esperaba 2h, obtuvo %v", cfg.PendingDeliveryTTL)
+	}
+}
+
+func TestLoadPendingDeliveryHoursInvalidaFalla(t *testing.T) {
+	for _, valor := range []string{"abc", "0", "-3", "1.5"} {
+		t.Run(valor, func(t *testing.T) {
+			setEnvCompleto(t)
+			t.Setenv("PENDING_DELIVERY_HOURS", valor)
+
+			if _, err := Load(); err == nil {
+				t.Fatalf("PENDING_DELIVERY_HOURS=%q debía fallar el arranque", valor)
+			}
+		})
+	}
+}
+
+func TestLoadSweeperIntervalInvalidoFalla(t *testing.T) {
+	for _, valor := range []string{"abc", "0"} {
+		t.Run(valor, func(t *testing.T) {
+			setEnvCompleto(t)
+			t.Setenv("SWEEPER_INTERVAL_MS", valor)
+
+			if _, err := Load(); err == nil {
+				t.Fatalf("SWEEPER_INTERVAL_MS=%q debía fallar el arranque", valor)
 			}
 		})
 	}

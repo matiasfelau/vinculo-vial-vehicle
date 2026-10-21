@@ -18,17 +18,18 @@ import (
 type fakeResolveOwnersUseCase struct {
 	ownerIDs        []uuid.UUID
 	patEncIA        string
+	pendingRef      *uuid.UUID
 	err             error
 	receivedPatEnc  string
 	receivedAlertID uuid.UUID
 	fueInvocado     bool
 }
 
-func (f *fakeResolveOwnersUseCase) ResolveOwners(ctx context.Context, patEnc string, alertID uuid.UUID) ([]uuid.UUID, string, error) {
+func (f *fakeResolveOwnersUseCase) ResolveOwners(ctx context.Context, patEnc string, alertID uuid.UUID) (domain.OwnerResolution, error) {
 	f.fueInvocado = true
 	f.receivedPatEnc = patEnc
 	f.receivedAlertID = alertID
-	return f.ownerIDs, f.patEncIA, f.err
+	return domain.OwnerResolution{OwnerIDs: f.ownerIDs, PatEncIA: f.patEncIA, PendingRef: f.pendingRef}, f.err
 }
 
 // validBody arma un request válido; los casos de error lo parten a mano.
@@ -74,6 +75,9 @@ func TestResolveOwnerPatenteConTresDuenosRetorna200ConLosTresUUIDs(t *testing.T)
 	if res.PatEncIA != "cifrado-para-ia" {
 		t.Fatalf("esperaba pat_enc_ia en la respuesta, obtuvo %q", res.PatEncIA)
 	}
+	if bytes.Contains(rec.Body.Bytes(), []byte("pending_ref")) {
+		t.Fatalf("con dueños pending_ref debía omitirse, obtuvo %s", rec.Body.String())
+	}
 	if resolver.receivedPatEnc != "criptograma" {
 		t.Fatal("el pat_enc recibido no coincide con el enviado al caso de uso")
 	}
@@ -101,6 +105,30 @@ func TestResolveOwnerPatenteSinDuenosRetorna200ConArrayVacio(t *testing.T) {
 	// IA valida la patente también cuando nadie la vinculó (US-10).
 	if !bytes.Contains(rec.Body.Bytes(), []byte(`"pat_enc_ia":"cifrado-para-ia"`)) {
 		t.Fatalf("pat_enc_ia debía ir también sin dueños, obtuvo %s", rec.Body.String())
+	}
+}
+
+func TestResolveOwnerPatenteSinDuenosIncluyePendingRef(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	pendingRef := uuid.New()
+	resolver := &fakeResolveOwnersUseCase{patEncIA: "cifrado-para-ia", pendingRef: &pendingRef}
+	router := NewInternalRouter(secretoDePrueba, resolver)
+
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, resolveOwnerRequestBody(t, validBody()))
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("esperaba 200, obtuvo %d (%s)", rec.Code, rec.Body.String())
+	}
+	var res resolveOwnerResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &res); err != nil {
+		t.Fatalf("la respuesta no es JSON: %v", err)
+	}
+	if len(res.OwnerIDs) != 0 {
+		t.Fatalf("esperaba owner_ids vacío, obtuvo %v", res.OwnerIDs)
+	}
+	if res.PendingRef == nil || *res.PendingRef != pendingRef {
+		t.Fatalf("esperaba pending_ref %v, obtuvo %v", pendingRef, res.PendingRef)
 	}
 }
 

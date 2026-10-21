@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 
@@ -16,8 +17,10 @@ type fakeRepository struct {
 	exists          bool
 	existsErr       error
 	owners          []uuid.UUID
+	pendingRef      *uuid.UUID
 	ownersErr       error
 	patHashRecibido string
+	propuesta       domain.PendingProposal
 }
 
 func (f *fakeRepository) Create(ctx context.Context, vehicle *domain.Vehicle) error {
@@ -29,9 +32,14 @@ func (f *fakeRepository) ExistsByPatHash(ctx context.Context, patHashed string) 
 	return f.exists, f.existsErr
 }
 
-func (f *fakeRepository) FindOwnersByPatHash(ctx context.Context, patHashed string) ([]uuid.UUID, error) {
+func (f *fakeRepository) FindOwnersOrReservePending(ctx context.Context, patHashed string, proposal domain.PendingProposal) ([]uuid.UUID, *uuid.UUID, error) {
 	f.patHashRecibido = patHashed
-	return f.owners, f.ownersErr
+	f.propuesta = proposal
+	return f.owners, f.pendingRef, f.ownersErr
+}
+
+func (f *fakeRepository) DeleteExpiredPending(ctx context.Context, now time.Time) (int64, error) {
+	return 0, nil
 }
 
 // fakePlateDecryptor es compartido por las pruebas de CheckVehicleService y

@@ -19,6 +19,7 @@ import (
 	"github.com/matiasfelau/vinculo-vial-vehicle/internal/lifecycle"
 	"github.com/matiasfelau/vinculo-vial-vehicle/internal/repository/postgres"
 	"github.com/matiasfelau/vinculo-vial-vehicle/internal/service/lookup"
+	"github.com/matiasfelau/vinculo-vial-vehicle/internal/service/sweeper"
 	"github.com/matiasfelau/vinculo-vial-vehicle/internal/service/vehicle"
 	"github.com/matiasfelau/vinculo-vial-vehicle/pkg/config"
 )
@@ -106,7 +107,7 @@ func main() {
 	)
 
 	checkVehicleService := lookup.NewCheckVehicleService(repository, payloadDecryptor, []byte(cfg.PatHMACSecret))
-	resolveOwnersService := lookup.NewResolveOwnersService(repository, payloadDecryptor, plateEncryptor, []byte(cfg.PatHMACSecret))
+	resolveOwnersService := lookup.NewResolveOwnersService(repository, payloadDecryptor, plateEncryptor, []byte(cfg.PatHMACSecret), cfg.PendingDeliveryTTL)
 
 	router := httpdelivery.NewRouter(registerVehicleService, checkVehicleService, repository, identityVerifier)
 	internalRouter := httpdelivery.NewInternalRouter(cfg.InternalServiceToken, resolveOwnersService)
@@ -137,7 +138,18 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
+	// El sweeper de patentes pendientes vencidas corre hasta la señal de apagado; se
+	// espera a que termine antes de cerrar el proceso.
+	sweeperDone := make(chan struct{})
+	go func() {
+		defer close(sweeperDone)
+		sweeper.NewPendingSweeper(repository).Run(ctx, cfg.SweeperInterval)
+	}()
+
 	if err := lifecycle.RunUntilSignal(ctx, []lifecycle.Server{publicServer, internalServer}, shutdownTimeout); err != nil {
 		log.Fatalf("error al iniciar el servidor HTTP: %v", err)
 	}
+
+	stop()
+	<-sweeperDone
 }
