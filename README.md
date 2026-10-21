@@ -88,11 +88,39 @@ La tabla nunca guarda la patente en claro, ni identificadores de alertas ni de e
   `resolve-owner` simultáneos a la misma patente comparten un único `pending_ref`.
 - **Vencimiento:** un sweeper borra las filas vencidas cada `SWEEPER_INTERVAL_MS`.
 
+## Eventos: outbox y publisher (US-10)
+
+Vehicle publica eventos por primera vez, con el mismo patrón que Alert e Identity:
+
+- **Transactional outbox:** el evento se inserta en `outbox_events` en la misma transacción que el
+  cambio que lo origina. Nunca hay un publish suelto después del commit.
+- **Worker:** publica los pendientes cada `OUTBOX_WORKER_INTERVAL_MS`, hasta `OUTBOX_WORKER_BATCH_SIZE`
+  por ciclo. Marca el evento como enviado solo después del *publisher confirm* del broker; si falla,
+  registra el intento y lo reintenta en el próximo ciclo con el mismo `eventId`, así que la entrega
+  es *at-least-once* y el consumidor debe deduplicar por `eventId`.
+- **Envelope estándar:** `{ eventId, eventType, timestamp, producer, actor, payload }`, mensajes
+  persistentes, `mandatory=true` y mensajes devueltos logueados (sin el cuerpo). La routing key es
+  el `eventType`.
+- **Topología:** la declara solo `vinculo-vial-core`. Vehicle verifica con `ExchangeDeclarePassive` que
+  `RABBITMQ_EXCHANGE` exista, al arrancar y al reconectar; si no existe, el arranque falla.
+- **Broker caído:** no es un error de despliegue. El servicio arranca en modo degradado, reconecta
+  en background con backoff (1 s a 30 s) y los eventos esperan en el outbox. Ninguna operación de
+  negocio depende del broker.
+- **Apagado ordenado:** se drenan los servidores HTTP y luego se detiene el worker, esperando al lote
+  en curso (hasta 5 s).
+
+```
+/internal/delivery/events    Conexión AMQP con reconexión, publisher y envelope
+/internal/service/outbox      Worker de publicación
+```
+
 ## Comandos
 
 ```
 go run ./cmd/api
 go test ./...
+# con un RabbitMQ disponible se ejecutan también las pruebas de integración del publisher:
+# TEST_RABBITMQ_URL=amqp://guest:guest@localhost:5672/ go test ./...
 CGO_ENABLED=0 go build -o vehicle ./cmd/api
 docker compose up --build
 ```

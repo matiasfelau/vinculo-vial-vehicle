@@ -36,6 +36,7 @@ func setupTestDB(t *testing.T) *gorm.DB {
 	t.Cleanup(func() {
 		db.Exec("DELETE FROM vehicles")
 		db.Exec("DELETE FROM pending_plates")
+		db.Exec("DELETE FROM outbox_events")
 	})
 
 	return db
