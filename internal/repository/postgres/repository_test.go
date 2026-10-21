@@ -29,6 +29,14 @@ func setupTestDB(t *testing.T) *gorm.DB {
 		t.Fatalf("no se pudo conectar a la base de datos de prueba: %v", err)
 	}
 
+	// Cada prueba abre su propio pool: se cierra al terminar para no agotar las
+	// conexiones del servidor de pruebas. Se registra primero para ejecutarse último.
+	t.Cleanup(func() {
+		if sqlDB, err := db.DB(); err == nil {
+			_ = sqlDB.Close()
+		}
+	})
+
 	if err := AutoMigrate(db); err != nil {
 		t.Fatalf("no se pudo migrar el esquema: %v", err)
 	}

@@ -45,3 +45,31 @@ type OutboxRepository interface {
 	// worker lo reintenta en el próximo ciclo.
 	MarkFailed(ctx context.Context, id uuid.UUID, lastErr string) error
 }
+
+// EventTypePendingClaimed es el eventType (y routing key) del evento que avisa
+// a Alert de que el primer dueño de una patente con alertas pendientes confirmó
+// su titularidad.
+const EventTypePendingClaimed = "vehicle.pending.claimed"
+
+// PendingClaimedPayload es el payload de vehicle.pending.claimed. Lleva solo el
+// pending_ref: ni la patente ni el blind index viajan por el bus. El dueño va en
+// el actor del envelope.
+type PendingClaimedPayload struct {
+	PendingRef uuid.UUID `json:"pending_ref"`
+}
+
+// NewPendingClaimedEvent construye el evento de outbox vehicle.pending.claimed.
+// El dueño que vinculó el vehículo va en Actor, nunca en el payload.
+func NewPendingClaimedEvent(id, ownerID, pendingRef uuid.UUID, createdAt time.Time) (OutboxEvent, error) {
+	payload, err := json.Marshal(PendingClaimedPayload{PendingRef: pendingRef})
+	if err != nil {
+		return OutboxEvent{}, err
+	}
+	return OutboxEvent{
+		ID:        id,
+		EventType: EventTypePendingClaimed,
+		Actor:     &ownerID,
+		Payload:   payload,
+		CreatedAt: createdAt,
+	}, nil
+}

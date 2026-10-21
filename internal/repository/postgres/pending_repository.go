@@ -2,6 +2,8 @@ package postgres
 
 import (
 	"context"
+	"database/sql"
+	"errors"
 	"fmt"
 	"time"
 
@@ -94,4 +96,42 @@ func (r *VehicleRepository) DeleteExpiredPending(ctx context.Context, now time.T
 		return 0, classifyError(result.Error)
 	}
 	return result.RowsAffected, nil
+}
+
+// claimPendingSQL borra la reserva de la patente y devuelve lo que tenía. El
+// DELETE toma el lock de la fila, así que si dos vinculaciones llegaran a
+// competir, solo una ve la fila: el evento sale una única vez.
+const claimPendingSQL = "DELETE FROM pending_plates WHERE plate_hmac = ? RETURNING pending_ref, expires_at"
+
+// claimPending consume la reserva pendiente de la patente del vehículo recién
+// creado, dentro de la transacción de Create. Si la reserva sigue vigente
+// encola vehicle.pending.claimed con actor = dueño. Una reserva vencida que el
+// sweeper todavía no borró también se elimina, pero no genera evento: sus
+// alertas ya no son entregables.
+//
+// Que exista una reserva implica que ningún otro dueño vinculó la patente
+// desde que se creó (resolve-owner nunca reserva una patente con dueños, y
+// ambos operan bajo el lock de la patente), así que quien la consume es el
+// primer dueño.
+func claimPending(tx *gorm.DB, vehicle *domain.Vehicle) error {
+	var (
+		pendingRef uuid.UUID
+		expiresAt  time.Time
+	)
+	err := tx.Raw(claimPendingSQL, vehicle.PatHashed).Row().Scan(&pendingRef, &expiresAt)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("no se pudo consumir la patente pendiente: %w", err)
+	}
+	if !expiresAt.After(vehicle.CreatedAt) {
+		return nil
+	}
+
+	event, err := domain.NewPendingClaimedEvent(uuid.New(), vehicle.OwnerID, pendingRef, vehicle.CreatedAt)
+	if err != nil {
+		return fmt.Errorf("no se pudo armar vehicle.pending.claimed: %w", err)
+	}
+	return insertOutboxEvent(tx, event)
 }

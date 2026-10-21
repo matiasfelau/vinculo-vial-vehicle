@@ -84,9 +84,32 @@ La tabla nunca guarda la patente en claro, ni identificadores de alertas ni de e
 - **Con dueños** (incluso si el único es el propio emisor, que Vehicle no conoce): no hay
   reserva. Alert descarta al emisor de `owner_ids`.
 - **Concurrencia:** la consulta de dueños y la reserva ocurren en una transacción bajo un
-  advisory lock por patente (`pg_advisory_xact_lock`), que también tomará la vinculación. Dos
+  advisory lock por patente (`pg_advisory_xact_lock`), que también toma la vinculación. Dos
   `resolve-owner` simultáneos a la misma patente comparten un único `pending_ref`.
+- **Vinculación:** al crear el vehículo, en la misma transacción y bajo el mismo lock, se borra la
+  reserva de la patente. Si estaba vigente se encola `vehicle.pending.claimed` en el outbox; si había
+  vencido, se borra sin evento. Si el vehículo no se llega a crear (por ejemplo, vinculación duplicada)
+  la transacción se revierte y la reserva queda intacta. Como el `DELETE` toma el lock de la fila, dos
+  vinculaciones simultáneas de la misma patente generan un único evento.
 - **Vencimiento:** un sweeper borra las filas vencidas cada `SWEEPER_INTERVAL_MS`.
+
+### Evento `vehicle.pending.claimed`
+
+Se publica por `RABBITMQ_EXCHANGE` con la routing key `vehicle.pending.claimed` y el envelope estándar:
+
+```json
+{
+  "eventId": "<id de la fila del outbox>",
+  "eventType": "vehicle.pending.claimed",
+  "timestamp": "RFC3339",
+  "producer": "vinculo-vial-vehicle",
+  "actor": "<owner_id del nuevo dueño>",
+  "payload": { "pending_ref": "uuid" }
+}
+```
+
+El payload no lleva la patente, el blind index ni identificadores de alertas. Alert lo consume en
+`alert.vehicle-pending-claimed.q` y debe deduplicar por `eventId` (entrega at-least-once).
 
 ## Eventos: outbox y publisher (US-10)
 
