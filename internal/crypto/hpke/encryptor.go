@@ -10,7 +10,8 @@ import (
 )
 
 // Encryptor cifra datos en claro con la clave pública HPKE de un destinatario remoto
-// (por ejemplo, la clave pública de Identity), en modo base, sin info ni AAD.
+// (por ejemplo, la clave pública de Identity o la de IA), en modo base y sin AAD.
+// El parámetro info del contexto HPKE es opcional: lo fija cada llamada.
 type Encryptor struct {
 	publicKey kem.PublicKey
 }
@@ -31,11 +32,19 @@ func NewEncryptor(publicKeyBase64 string) (*Encryptor, error) {
 	return &Encryptor{publicKey: publicKey}, nil
 }
 
-// Encrypt cifra el texto en claro y retorna la concatenación enc || ciphertext,
-// donde enc es la clave encapsulada por el KEM y ciphertext es el sellado AEAD.
+// Encrypt cifra el texto en claro sin info y retorna la concatenación enc || ciphertext.
+// Equivale a EncryptWithInfo(plaintext, nil).
 func (e *Encryptor) Encrypt(plaintext []byte) ([]byte, error) {
+	return e.EncryptWithInfo(plaintext, nil)
+}
+
+// EncryptWithInfo cifra el texto en claro atando el criptograma al info recibido
+// (por ejemplo, el alert_id) y retorna la concatenación enc || ciphertext, donde enc
+// es la clave encapsulada por el KEM y ciphertext es el sellado AEAD. El destinatario
+// solo puede descifrarlo con el mismo info.
+func (e *Encryptor) EncryptWithInfo(plaintext, info []byte) ([]byte, error) {
 	suite := hpke.NewSuite(kemID, kdfID, aeadID)
-	sender, err := suite.NewSender(e.publicKey, nil)
+	sender, err := suite.NewSender(e.publicKey, info)
 	if err != nil {
 		return nil, fmt.Errorf("hpke: no se pudo inicializar el emisor: %w", err)
 	}

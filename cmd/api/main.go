@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"log"
 	"net/http"
 	"os"
@@ -14,10 +15,13 @@ import (
 	"github.com/matiasfelau/vinculo-vial-vehicle/internal/client/identity"
 	"github.com/matiasfelau/vinculo-vial-vehicle/internal/crypto/hpke"
 	"github.com/matiasfelau/vinculo-vial-vehicle/internal/crypto/symmetric"
+	"github.com/matiasfelau/vinculo-vial-vehicle/internal/delivery/events"
 	httpdelivery "github.com/matiasfelau/vinculo-vial-vehicle/internal/delivery/http"
 	"github.com/matiasfelau/vinculo-vial-vehicle/internal/lifecycle"
 	"github.com/matiasfelau/vinculo-vial-vehicle/internal/repository/postgres"
 	"github.com/matiasfelau/vinculo-vial-vehicle/internal/service/lookup"
+	"github.com/matiasfelau/vinculo-vial-vehicle/internal/service/outbox"
+	"github.com/matiasfelau/vinculo-vial-vehicle/internal/service/sweeper"
 	"github.com/matiasfelau/vinculo-vial-vehicle/internal/service/vehicle"
 	"github.com/matiasfelau/vinculo-vial-vehicle/pkg/config"
 )
@@ -33,7 +37,28 @@ const (
 	httpWriteTimeout      = 15 * time.Second
 	httpIdleTimeout       = 60 * time.Second
 	shutdownTimeout       = 10 * time.Second
+
+	// workerShutdownTimeout acota cuánto espera el apagado al lote en curso del
+	// worker de outbox.
+	workerShutdownTimeout = 5 * time.Second
 )
+
+// newEncryptors construye los dos cifradores HPKE de salida, cada uno con la
+// clave pública de su destinatario: dni hacia Identity (IDENTITY_HPKE_PUBLIC_KEY)
+// y plate hacia IA (IA_HPKE_PUBLIC_KEY). Una clave inválida hace fallar el arranque.
+func newEncryptors(cfg *config.Config) (dni, plate *hpke.Encryptor, err error) {
+	dni, err = hpke.NewEncryptor(cfg.IdentityHPKEPublicKey)
+	if err != nil {
+		return nil, nil, fmt.Errorf("cifrador hacia identity: %w", err)
+	}
+
+	plate, err = hpke.NewEncryptor(cfg.IAHPKEPublicKey)
+	if err != nil {
+		return nil, nil, fmt.Errorf("cifrador hacia ia: %w", err)
+	}
+
+	return dni, plate, nil
+}
 
 func main() {
 	cfg, err := config.Load()
@@ -46,9 +71,9 @@ func main() {
 		log.Fatalf("no se pudo inicializar el desencriptador HPKE: %v", err)
 	}
 
-	dniEncryptor, err := hpke.NewEncryptor(cfg.IdentityHPKEPublicKey)
+	dniEncryptor, plateEncryptor, err := newEncryptors(cfg)
 	if err != nil {
-		log.Fatalf("no se pudo inicializar el cifrador HPKE hacia identity: %v", err)
+		log.Fatalf("no se pudieron inicializar los cifradores HPKE: %v", err)
 	}
 
 	plateCipher, err := symmetric.NewCipher(cfg.PatAESKey)
@@ -72,6 +97,20 @@ func main() {
 		log.Fatalf("no se pudo migrar el esquema: %v", err)
 	}
 	repository := postgres.NewVehicleRepository(db, postgres.WithQueryTimeout(cfg.DBQueryTimeout))
+	outboxRepository := postgres.NewOutboxRepository(db, cfg.DBQueryTimeout)
+
+	// Connect solo devuelve error si el exchange no existe (error de despliegue): un
+	// broker inalcanzable no hace fallar el arranque. El servicio arranca en modo
+	// degradado y reconecta en background; los eventos esperan en el outbox.
+	rabbitConn, err := events.Connect(cfg.RabbitMQURL, cfg.RabbitMQExchange)
+	if err != nil {
+		log.Fatalf("no se pudo conectar con RabbitMQ: %v", err)
+	}
+	defer rabbitConn.Close()
+
+	// El worker de outbox publica en background: ninguna operación de negocio
+	// depende de la disponibilidad del broker.
+	outboxWorker := outbox.NewWorker(outboxRepository, events.NewPublisher(rabbitConn, cfg.RabbitMQExchange, cfg.RabbitMQPublishTimeout), cfg.OutboxWorkerBatchSize)
 
 	identityClient := identity.NewClient(cfg.IdentityInternalURL, cfg.InternalServiceToken, time.Duration(cfg.IdentityTimeoutMS)*time.Millisecond)
 	identityCircuitBreaker := breaker.New(cfg.IdentityCBFailureThreshold, cfg.IdentityCBWindow, cfg.IdentityCBOpenDuration)
@@ -87,10 +126,9 @@ func main() {
 		[]byte(cfg.PatHMACSecret),
 	)
 
-	checkVehicleService := lookup.NewCheckVehicleService(repository, payloadDecryptor, []byte(cfg.PatHMACSecret))
-	resolveOwnersService := lookup.NewResolveOwnersService(repository, payloadDecryptor, []byte(cfg.PatHMACSecret))
+	resolveOwnersService := lookup.NewResolveOwnersService(repository, payloadDecryptor, plateEncryptor, []byte(cfg.PatHMACSecret), cfg.PendingDeliveryTTL)
 
-	router := httpdelivery.NewRouter(registerVehicleService, checkVehicleService, repository, identityVerifier)
+	router := httpdelivery.NewRouter(registerVehicleService, repository, identityVerifier)
 	internalRouter := httpdelivery.NewInternalRouter(cfg.InternalServiceToken, resolveOwnersService)
 
 	publicServer := &http.Server{
@@ -119,7 +157,36 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
+	workerCtx, stopWorker := context.WithCancel(context.Background())
+	defer stopWorker()
+	workerDone := make(chan struct{})
+	go func() {
+		defer close(workerDone)
+		outboxWorker.Run(workerCtx, cfg.OutboxWorkerInterval)
+	}()
+
+	// El sweeper de patentes pendientes vencidas corre hasta la señal de apagado; se
+	// espera a que termine antes de cerrar el proceso.
+	sweeperDone := make(chan struct{})
+	go func() {
+		defer close(sweeperDone)
+		sweeper.NewPendingSweeper(repository).Run(ctx, cfg.SweeperInterval)
+	}()
+
 	if err := lifecycle.RunUntilSignal(ctx, []lifecycle.Server{publicServer, internalServer}, shutdownTimeout); err != nil {
 		log.Fatalf("error al iniciar el servidor HTTP: %v", err)
+	}
+
+	stop()
+	<-sweeperDone
+
+	// El worker se detiene después de drenar los servidores, para que un evento
+	// encolado por una petición en vuelo todavía alcance a publicarse. Lo que no
+	// llegue queda en el outbox y sale al reiniciar.
+	stopWorker()
+	select {
+	case <-workerDone:
+	case <-time.After(workerShutdownTimeout):
+		log.Println("el worker de outbox no terminó a tiempo; los eventos pendientes se reintentan al reiniciar")
 	}
 }

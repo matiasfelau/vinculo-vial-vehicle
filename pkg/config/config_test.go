@@ -15,8 +15,10 @@ func setEnvCompleto(t *testing.T) {
 		"PAT_AES_KEY":              "clave-de-prueba",
 		"PAT_HMAC_SECRET":          "clave-de-prueba",
 		"IDENTITY_HPKE_PUBLIC_KEY": "clave-de-prueba",
+		"IA_HPKE_PUBLIC_KEY":       "clave-de-prueba-ia",
 		"MOCK_DNRPA_OWNER_DNI":     "12345678",
 		"INTERNAL_SERVICE_TOKEN":   "token-de-prueba",
+		"RABBITMQ_URL":             "amqp://guest:guest@localhost:5672/",
 	}
 
 	for k, v := range vars {
@@ -54,6 +56,15 @@ func TestLoadConConfiguracionCompleta(t *testing.T) {
 	}
 	if cfg.DBQueryTimeout != 1500*time.Millisecond {
 		t.Errorf("esperaba timeout de consulta por defecto de 1500ms, obtuvo %v", cfg.DBQueryTimeout)
+	}
+	if cfg.PendingDeliveryTTL != 24*time.Hour {
+		t.Errorf("esperaba PENDING_DELIVERY_HOURS por defecto de 24h, obtuvo %v", cfg.PendingDeliveryTTL)
+	}
+	if cfg.SweeperInterval != time.Minute {
+		t.Errorf("esperaba SWEEPER_INTERVAL_MS por defecto de 60s, obtuvo %v", cfg.SweeperInterval)
+	}
+	if cfg.IAHPKEPublicKey != "clave-de-prueba-ia" {
+		t.Errorf("esperaba IA_HPKE_PUBLIC_KEY cargada, obtuvo %q", cfg.IAHPKEPublicKey)
 	}
 }
 
@@ -170,6 +181,7 @@ func TestLoadFallaSinVariablesObligatorias(t *testing.T) {
 		"PAT_AES_KEY",
 		"PAT_HMAC_SECRET",
 		"IDENTITY_HPKE_PUBLIC_KEY",
+		"IA_HPKE_PUBLIC_KEY",
 		"MOCK_DNRPA_OWNER_DNI",
 		"INTERNAL_SERVICE_TOKEN",
 	}
@@ -181,6 +193,96 @@ func TestLoadFallaSinVariablesObligatorias(t *testing.T) {
 
 			if _, err := Load(); err == nil {
 				t.Fatalf("esperaba error al faltar %s", faltante)
+			}
+		})
+	}
+}
+
+func TestLoadPendingDeliveryHoursConfigurable(t *testing.T) {
+	setEnvCompleto(t)
+	t.Setenv("PENDING_DELIVERY_HOURS", "2")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("no se esperaba error: %v", err)
+	}
+	if cfg.PendingDeliveryTTL != 2*time.Hour {
+		t.Fatalf("esperaba 2h, obtuvo %v", cfg.PendingDeliveryTTL)
+	}
+}
+
+func TestLoadPendingDeliveryHoursInvalidaFalla(t *testing.T) {
+	for _, valor := range []string{"abc", "0", "-3", "1.5"} {
+		t.Run(valor, func(t *testing.T) {
+			setEnvCompleto(t)
+			t.Setenv("PENDING_DELIVERY_HOURS", valor)
+
+			if _, err := Load(); err == nil {
+				t.Fatalf("PENDING_DELIVERY_HOURS=%q debía fallar el arranque", valor)
+			}
+		})
+	}
+}
+
+func TestLoadSweeperIntervalInvalidoFalla(t *testing.T) {
+	for _, valor := range []string{"abc", "0"} {
+		t.Run(valor, func(t *testing.T) {
+			setEnvCompleto(t)
+			t.Setenv("SWEEPER_INTERVAL_MS", valor)
+
+			if _, err := Load(); err == nil {
+				t.Fatalf("SWEEPER_INTERVAL_MS=%q debía fallar el arranque", valor)
+			}
+		})
+	}
+}
+
+func TestLoadRabbitMQPorDefecto(t *testing.T) {
+	setEnvCompleto(t)
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("no se esperaba error: %v", err)
+	}
+	if cfg.RabbitMQURL != "amqp://guest:guest@localhost:5672/" {
+		t.Errorf("RABBITMQ_URL no cargada: %q", cfg.RabbitMQURL)
+	}
+	if cfg.RabbitMQExchange != "vvi.topic.exchange" {
+		t.Errorf("esperaba exchange por defecto vvi.topic.exchange, obtuvo %q", cfg.RabbitMQExchange)
+	}
+	if cfg.RabbitMQPublishTimeout != 2*time.Second {
+		t.Errorf("esperaba timeout de publicación por defecto de 2s, obtuvo %v", cfg.RabbitMQPublishTimeout)
+	}
+	if cfg.OutboxWorkerInterval != 2*time.Second {
+		t.Errorf("esperaba intervalo del worker por defecto de 2s, obtuvo %v", cfg.OutboxWorkerInterval)
+	}
+	if cfg.OutboxWorkerBatchSize != 20 {
+		t.Errorf("esperaba lote por defecto de 20, obtuvo %d", cfg.OutboxWorkerBatchSize)
+	}
+}
+
+func TestLoadSinRabbitMQURLFalla(t *testing.T) {
+	setEnvCompleto(t)
+	t.Setenv("RABBITMQ_URL", "")
+
+	if _, err := Load(); err == nil {
+		t.Fatal("RABBITMQ_URL es obligatoria: el arranque debía fallar")
+	}
+}
+
+func TestLoadParametrosDeRabbitMQInvalidosFallan(t *testing.T) {
+	casos := map[string]string{
+		"RABBITMQ_PUBLISH_TIMEOUT_MS": "0",
+		"OUTBOX_WORKER_INTERVAL_MS":   "abc",
+		"OUTBOX_WORKER_BATCH_SIZE":    "0",
+	}
+	for nombre, valor := range casos {
+		t.Run(nombre, func(t *testing.T) {
+			setEnvCompleto(t)
+			t.Setenv(nombre, valor)
+
+			if _, err := Load(); err == nil {
+				t.Fatalf("%s=%q debía fallar el arranque", nombre, valor)
 			}
 		})
 	}

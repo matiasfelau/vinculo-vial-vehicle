@@ -16,15 +16,21 @@ import (
 // uso, para poder probarlo con un doble sin depender de su implementación
 // concreta.
 type resolveOwnersUseCase interface {
-	ResolveOwners(ctx context.Context, patEnc string) ([]uuid.UUID, error)
+	ResolveOwners(ctx context.Context, patEnc string, alertID uuid.UUID) (domain.OwnerResolution, error)
 }
 
 type resolveOwnerRequest struct {
-	PatEnc string `json:"pat_enc" binding:"required"`
+	PatEnc  string `json:"pat_enc" binding:"required"`
+	AlertID string `json:"alert_id" binding:"required"`
 }
 
+// resolveOwnerResponse es la respuesta de /internal/resolve-owner. PatEncIA va
+// siempre, también cuando owner_ids está vacío: IA valida la patente igual.
+// PendingRef solo va cuando la patente no tiene dueños (US-10) y se omite si no.
 type resolveOwnerResponse struct {
-	OwnerIDs []uuid.UUID `json:"owner_ids"`
+	OwnerIDs   []uuid.UUID `json:"owner_ids"`
+	PatEncIA   string      `json:"pat_enc_ia"`
+	PendingRef *uuid.UUID  `json:"pending_ref,omitempty"`
 }
 
 // ResolveOwnerHandler expone POST /internal/resolve-owner sobre el router
@@ -32,8 +38,10 @@ type resolveOwnerResponse struct {
 // por requireServiceToken antes de llegar acá: este handler nunca produce un
 // 401 por su cuenta, ni aplica ninguna regla de negocio sobre quién pregunta.
 //
-// La respuesta es siempre {owner_ids: [...]}, con un array vacío (nunca null)
-// cuando la patente no está en la red: es un resultado válido, no un error.
+// El request exige pat_enc y alert_id (UUID). La respuesta es siempre
+// {owner_ids: [...], pat_enc_ia: "...", pending_ref?: "..."}, con un array vacío
+// (nunca null) cuando la patente no está en la red: es un resultado válido, no
+// un error. pending_ref solo acompaña a un owner_ids vacío.
 func ResolveOwnerHandler(useCase resolveOwnersUseCase) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		var req resolveOwnerRequest
@@ -43,16 +51,24 @@ func ResolveOwnerHandler(useCase resolveOwnersUseCase) gin.HandlerFunc {
 			return
 		}
 
-		ownerIDs, err := useCase.ResolveOwners(c.Request.Context(), req.PatEnc)
+		alertID, err := uuid.Parse(req.AlertID)
+		if err != nil {
+			log.Printf("POST /internal/resolve-owner: alert_id no es un UUID válido")
+			c.JSON(http.StatusBadRequest, gin.H{"error": "alert_id inválido"})
+			return
+		}
+
+		resolution, err := useCase.ResolveOwners(c.Request.Context(), req.PatEnc, alertID)
 		if err != nil {
 			writeResolveOwnerError(c, err)
 			return
 		}
+		ownerIDs := resolution.OwnerIDs
 		if ownerIDs == nil {
 			ownerIDs = []uuid.UUID{}
 		}
 
-		c.JSON(http.StatusOK, resolveOwnerResponse{OwnerIDs: ownerIDs})
+		c.JSON(http.StatusOK, resolveOwnerResponse{OwnerIDs: ownerIDs, PatEncIA: resolution.PatEncIA, PendingRef: resolution.PendingRef})
 	}
 }
 

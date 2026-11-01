@@ -14,6 +14,19 @@ Identity antes de persistir la vinculación.
   `vinculo-vial-identity` por red interna.
 - Desencriptar, validar, calcular el Blind Index y cifrar la patente en reposo.
 - Persistir la vinculación `(owner_id, patente)` respetando la regla de unicidad compuesta.
+- No expone ninguna consulta pública de existencia de patentes. Quien necesita saber si una
+  patente está registrada (Alert, al recibir un intento de alerta) lo pregunta por
+  `/internal/resolve-owner`, en la red interna.
+
+## Endpoints públicos
+
+| Método y path | Descripción |
+|---|---|
+| `POST /api/v1/vehicles` | Alta de la vinculación `(owner_id, patente)`. |
+| `GET /health`, `GET /ready`, `GET /health/deps` | Salud del servicio y de sus dependencias. |
+
+`POST /api/v1/vehicles/check` se eliminó en US-08: era un oráculo público de existencia de
+patentes. Responde 404.
 
 ## Arquitectura
 
@@ -26,6 +39,7 @@ integran únicamente en las capas de infraestructura (`repository`, `delivery`, 
 /cmd/api                    Punto de entrada del binario
 /internal/domain            Entidades e interfaces del dominio
 /internal/service/vehicle   Caso de uso de vinculación de vehículo
+/internal/service/sweeper   Borrado periódico de patentes pendientes vencidas
 /internal/repository/postgres  Persistencia (GORM/PostgreSQL)
 /internal/delivery/http     Handlers HTTP (Gin)
 /internal/client/identity   Cliente hacia el servicio Identity
@@ -42,11 +56,107 @@ integran únicamente en las capas de infraestructura (`repository`, `delivery`, 
 
 Ver [.env.example](.env.example) para el detalle de las variables de entorno requeridas.
 
+## Endpoint interno: resolución del dueño
+
+`POST /internal/resolve-owner` lo consume solo `vinculo-vial-alert`, por la red
+`vinculo-vial` y con el header `X-Internal-Service-Token`. Nunca se expone en Kong.
+
+```
+req:  { "pat_enc": "<base64>", "alert_id": "uuid" }
+res:  200 { "owner_ids": ["uuid", ...], "pat_enc_ia": "<base64>", "pending_ref": "uuid" }
+      400 criptograma, formato de patente o alert_id inválidos · 503 base no disponible
+```
+
+- `pat_enc_ia` es la patente canónica cifrada con HPKE hacia `IA_HPKE_PUBLIC_KEY`, con
+  `info = alert_id`. Se devuelve **siempre**, también cuando `owner_ids` está vacío
+  (US-10): el emisor nunca se entera de si la patente tiene dueños, e IA valida la
+  alerta igual.
+- `owner_ids` vacío (`[]`, nunca `null`) es un resultado válido, no un error.
+- `pending_ref` solo se devuelve cuando `owner_ids` está vacío (ver "Patentes pendientes").
+- La patente en claro se purga de memoria en todos los caminos. Ni la patente, ni
+  `pat_enc`, ni `pat_enc_ia`, ni el Blind Index se loguean.
+
+## Patentes pendientes de entrega (US-10)
+
+Cuando Alert resuelve una patente sin dueños, Vehicle la reserva en la tabla `pending_plates`
+para que el primer usuario que la vincule reciba las alertas de las últimas
+`PENDING_DELIVERY_HOURS` (24 h por defecto).
+
+| Columna | Contenido |
+|---|---|
+| `plate_hmac` | Blind Index de la patente (el mismo HMAC de `vehicles.pat_hashed`). Clave primaria: una fila por patente |
+| `pending_ref` | UUID opaco que Alert guarda junto a sus alertas. Único |
+| `expires_at` | `now + PENDING_DELIVERY_HOURS`; se extiende con cada alerta nueva a esa patente |
+| `created_at` | Alta de la reserva vigente |
+
+La tabla nunca guarda la patente en claro, ni identificadores de alertas ni de emisores.
+
+- **Sin dueños:** `resolve-owner` crea la fila o, si hay una vigente, reutiliza su `pending_ref` y
+  extiende `expires_at`. Una fila vencida que el sweeper todavía no borró no se reutiliza: se
+  emite un `pending_ref` nuevo.
+- **Con dueños** (incluso si el único es el propio emisor, que Vehicle no conoce): no hay
+  reserva. Alert descarta al emisor de `owner_ids`.
+- **Concurrencia:** la consulta de dueños y la reserva ocurren en una transacción bajo un
+  advisory lock por patente (`pg_advisory_xact_lock`), que también toma la vinculación. Dos
+  `resolve-owner` simultáneos a la misma patente comparten un único `pending_ref`.
+- **Vinculación:** al crear el vehículo, en la misma transacción y bajo el mismo lock, se borra la
+  reserva de la patente. Si estaba vigente se encola `vehicle.pending.claimed` en el outbox; si había
+  vencido, se borra sin evento. Si el vehículo no se llega a crear (por ejemplo, vinculación duplicada)
+  la transacción se revierte y la reserva queda intacta. Como el `DELETE` toma el lock de la fila, dos
+  vinculaciones simultáneas de la misma patente generan un único evento.
+- **Vencimiento:** un sweeper borra las filas vencidas cada `SWEEPER_INTERVAL_MS`.
+
+### Evento `vehicle.pending.claimed`
+
+Se publica por `RABBITMQ_EXCHANGE` con la routing key `vehicle.pending.claimed` y el envelope estándar:
+
+```json
+{
+  "eventId": "<id de la fila del outbox>",
+  "eventType": "vehicle.pending.claimed",
+  "timestamp": "RFC3339",
+  "producer": "vinculo-vial-vehicle",
+  "actor": "<owner_id del nuevo dueño>",
+  "payload": { "pending_ref": "uuid" }
+}
+```
+
+El payload no lleva la patente, el blind index ni identificadores de alertas. Alert lo consume en
+`alert.vehicle-pending-claimed.q` y debe deduplicar por `eventId` (entrega at-least-once).
+
+## Eventos: outbox y publisher (US-10)
+
+Vehicle publica eventos por primera vez, con el mismo patrón que Alert e Identity:
+
+- **Transactional outbox:** el evento se inserta en `outbox_events` en la misma transacción que el
+  cambio que lo origina. Nunca hay un publish suelto después del commit.
+- **Worker:** publica los pendientes cada `OUTBOX_WORKER_INTERVAL_MS`, hasta `OUTBOX_WORKER_BATCH_SIZE`
+  por ciclo. Marca el evento como enviado solo después del *publisher confirm* del broker; si falla,
+  registra el intento y lo reintenta en el próximo ciclo con el mismo `eventId`, así que la entrega
+  es *at-least-once* y el consumidor debe deduplicar por `eventId`.
+- **Envelope estándar:** `{ eventId, eventType, timestamp, producer, actor, payload }`, mensajes
+  persistentes, `mandatory=true` y mensajes devueltos logueados (sin el cuerpo). La routing key es
+  el `eventType`.
+- **Topología:** la declara solo `vinculo-vial-core`. Vehicle verifica con `ExchangeDeclarePassive` que
+  `RABBITMQ_EXCHANGE` exista, al arrancar y al reconectar; si no existe, el arranque falla.
+- **Broker caído:** no es un error de despliegue. El servicio arranca en modo degradado, reconecta
+  en background con backoff (1 s a 30 s) y los eventos esperan en el outbox. Ninguna operación de
+  negocio depende del broker.
+- **Apagado ordenado:** se drenan los servidores HTTP y luego se detiene el worker, esperando al lote
+  en curso (hasta 5 s).
+
+```
+/internal/delivery/events    Conexión AMQP con reconexión, publisher y envelope
+/internal/service/outbox      Worker de publicación
+```
+
 ## Comandos
 
 ```
 go run ./cmd/api
 go test ./...
+# con un RabbitMQ disponible se ejecutan también las pruebas de integración del publisher:
+# TEST_RABBITMQ_URL=amqp://guest:guest@localhost:5672/ go test ./...
 CGO_ENABLED=0 go build -o vehicle ./cmd/api
 docker compose up --build
 ```

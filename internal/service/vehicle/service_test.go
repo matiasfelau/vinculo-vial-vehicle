@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 
@@ -23,12 +24,12 @@ func (f *fakeRepository) Create(ctx context.Context, vehicle *domain.Vehicle) er
 	return f.createErr
 }
 
-func (f *fakeRepository) ExistsByPatHash(ctx context.Context, patHashed string) (bool, error) {
-	return false, nil
+func (f *fakeRepository) FindOwnersOrReservePending(ctx context.Context, patHashed string, proposal domain.PendingProposal) ([]uuid.UUID, *uuid.UUID, error) {
+	return nil, nil, nil
 }
 
-func (f *fakeRepository) FindOwnersByPatHash(ctx context.Context, patHashed string) ([]uuid.UUID, error) {
-	return nil, nil
+func (f *fakeRepository) DeleteExpiredPending(ctx context.Context, now time.Time) (int64, error) {
+	return 0, nil
 }
 
 type fakeOwnershipVerifier struct {
