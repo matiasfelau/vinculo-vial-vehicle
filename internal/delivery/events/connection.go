@@ -189,11 +189,7 @@ func (c *Connection) reconnectLoop() {
 }
 
 func nextDelay(current time.Duration) time.Duration {
-	next := current * 2
-	if next > reconnectMaxDelay {
-		return reconnectMaxDelay
-	}
-	return next
+	return nextBackoff(current, reconnectMaxDelay)
 }
 
 func (c *Connection) setHealthy(healthy bool) {

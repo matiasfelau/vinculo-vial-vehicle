@@ -13,15 +13,17 @@ type Pingable interface {
 	Ping(ctx context.Context) error
 }
 
-// NewRouter construye el motor Gin con las rutas del servicio registradas.
-func NewRouter(registrar registerVehicleUseCase, db Pingable, identity circuitStateReporter) *gin.Engine {
+// NewRouter construye el motor Gin con las rutas del servicio registradas. extra
+// suma las dependencias que /health/deps reporta además del circuito hacia
+// identity (los consumidores de RabbitMQ).
+func NewRouter(registrar registerVehicleUseCase, db Pingable, identity circuitStateReporter, extra ...DependencyCheck) *gin.Engine {
 	engine := gin.New()
 	engine.Use(gin.Logger())
 	engine.Use(gin.Recovery())
 
 	engine.GET("/health", healthCheck)
 	engine.GET("/ready", readyCheck(db))
-	engine.GET("/health/deps", DepsHealthHandler(identity))
+	engine.GET("/health/deps", DepsHealthHandler(identity, extra...))
 	engine.POST("/api/v1/vehicles", RegisterVehicleHandler(registrar))
 
 	return engine

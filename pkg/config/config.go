@@ -3,6 +3,7 @@ package config
 
 import (
 	"fmt"
+	"math"
 	"os"
 	"strconv"
 	"time"
@@ -14,6 +15,15 @@ const defaultPendingDeliveryHours = "24"
 
 // defaultRabbitMQExchange es el exchange topic de la plataforma.
 const defaultRabbitMQExchange = "vvi.topic.exchange"
+
+// defaultUserDeletedQueue es la cola de trabajo donde Vehicle consume user.deleted
+// (US-11). Su nombre sigue la convención <consumidor>.<evento-kebab>.q y debe
+// coincidir con el que declara vinculo-vial-core.
+const defaultUserDeletedQueue = "vehicle.user-deleted.q"
+
+// maxRabbitMQPrefetch es el mayor prefetch que admite basic.qos: el campo del
+// protocolo es de 16 bits y un valor mayor se truncaría en silencio.
+const maxRabbitMQPrefetch = 65535
 
 // Config agrupa los parámetros de configuración requeridos por el servicio.
 type Config struct {
@@ -59,6 +69,19 @@ type Config struct {
 	// el outbox: cada cuánto revisa los pendientes y cuántos intenta por ciclo.
 	OutboxWorkerInterval  time.Duration
 	OutboxWorkerBatchSize int
+
+	// UserDeletedQueue es la cola de trabajo de la que Vehicle consume user.deleted
+	// (US-11). La topología (la cola, su .retry y su .dlq) la declara solo
+	// vinculo-vial-core.
+	UserDeletedQueue string
+
+	// RabbitMQPrefetch es el basic.qos de los consumidores: cuántos mensajes sin
+	// ack admite el canal en vuelo.
+	RabbitMQPrefetch int
+
+	// MaxRetries es cuántas veces se reintenta un mensaje con fallo transitorio
+	// (cola .retry) antes de derivarlo a la DLQ.
+	MaxRetries int64
 }
 
 // Load construye la configuración a partir de las variables de entorno del proceso.
@@ -78,6 +101,7 @@ func Load() (*Config, error) {
 		InternalServiceToken:  os.Getenv("INTERNAL_SERVICE_TOKEN"),
 		RabbitMQURL:           os.Getenv("RABBITMQ_URL"),
 		RabbitMQExchange:      os.Getenv("RABBITMQ_EXCHANGE"),
+		UserDeletedQueue:      os.Getenv("USER_DELETED_QUEUE"),
 	}
 
 	if cfg.Port == "" {
@@ -192,6 +216,22 @@ func Load() (*Config, error) {
 	}
 	cfg.OutboxWorkerBatchSize = batchSize
 
+	if cfg.UserDeletedQueue == "" {
+		cfg.UserDeletedQueue = defaultUserDeletedQueue
+	}
+
+	prefetch, err := parseIntInRange("RABBITMQ_PREFETCH", "10", 1, maxRabbitMQPrefetch)
+	if err != nil {
+		return nil, err
+	}
+	cfg.RabbitMQPrefetch = int(prefetch)
+
+	maxRetries, err := parseIntInRange("MAX_RETRIES", "5", 0, math.MaxInt32)
+	if err != nil {
+		return nil, err
+	}
+	cfg.MaxRetries = maxRetries
+
 	if cfg.DatabaseURL == "" {
 		return nil, fmt.Errorf("config: DATABASE_URL es obligatoria")
 	}
@@ -224,6 +264,25 @@ func Load() (*Config, error) {
 	}
 
 	return cfg, nil
+}
+
+// parseIntInRange lee la variable de entorno name como un entero dentro de
+// [lo, hi], usando defaultRaw cuando la variable no está definida.
+func parseIntInRange(name, defaultRaw string, lo, hi int64) (int64, error) {
+	raw := os.Getenv(name)
+	if raw == "" {
+		raw = defaultRaw
+	}
+
+	value, err := strconv.ParseInt(raw, 10, 64)
+	if err != nil {
+		return 0, fmt.Errorf("config: %s inválido: %w", name, err)
+	}
+	if value < lo || value > hi {
+		return 0, fmt.Errorf("config: %s debe estar entre %d y %d", name, lo, hi)
+	}
+
+	return value, nil
 }
 
 // parsePositiveMillis lee la variable de entorno name como una cantidad de

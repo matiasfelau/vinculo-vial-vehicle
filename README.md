@@ -146,9 +146,54 @@ Vehicle publica eventos por primera vez, con el mismo patrón que Alert e Identi
   en curso (hasta 5 s).
 
 ```
-/internal/delivery/events    Conexión AMQP con reconexión, publisher y envelope
+/internal/delivery/events    Conexión AMQP con reconexión, publisher, consumidor y envelopes
 /internal/service/outbox      Worker de publicación
+/internal/service/userdeleted Caso de uso de la baja de cuenta
 ```
+
+## Baja de cuenta: consumidor de `user.deleted` (US-11)
+
+Cuando un usuario da de baja su cuenta, Identity publica `user.deleted` (`actor` = el usuario
+dado de baja, payload `{ "deleted_at": "RFC3339" }`). Vehicle lo consume en
+`vehicle.user-deleted.q` (`USER_DELETED_QUEUE`) y, en una transacción, ejecuta
+`DELETE FROM vehicles WHERE owner_id = <actor>`.
+
+- **Alcance:** solo las filas del usuario. Si otro titular vinculó la misma patente conserva su
+  vínculo (`UNIQUE(owner_id, pat_hashed)`: son filas distintas). `pending_plates` no se toca.
+- **Idempotente:** repetir la entrega no encuentra filas y termina sin error, así que no hace
+  falta deduplicar por `eventId`.
+- **Validación:** el `eventType` debe ser `user.deleted`, el `actor` un UUID no nulo y
+  `deleted_at` una fecha RFC3339. Un mensaje que no cumple es inválido.
+- **Logs:** solo `eventId` y la cantidad de vehículos borrados; nunca el usuario ni patentes.
+
+### Resiliencia del consumidor
+
+Es el primer consumidor del servicio y sigue el patrón de Alert:
+
+- **Ack manual** después de procesar con éxito, y `prefetch` (`basic.qos`) en `RABBITMQ_PREFETCH`.
+- **Fallo transitorio** (base caída o en timeout): `nack` sin requeue. La cola de trabajo lo
+  deriva a `.retry`, que lo devuelve al vencer su TTL. Se cuenta con `x-death` y, superados
+  `MAX_RETRIES` reintentos, se publica en la DLQ.
+- **Mensaje inválido** (envelope ilegible, `eventType`, `actor` o payload fuera del contrato) o
+  **panic** del procesador: directo a la DLQ, sin reintento.
+- **DLQ:** se publica en `vvi.dlq.exchange` con la routing key igual al **nombre de la cola de
+  trabajo** (nunca la del evento), persistente, `mandatory=true` y con *publisher confirm*; el
+  original solo recibe `ack` después del confirm. Si la DLQ no confirma, vuelve al ciclo de retry.
+  El motivo del descarte va en el header `x-discard-reason`, sin contenido del mensaje.
+- **Reconexión:** el consumidor tiene su propia conexión y reconecta con backoff (1 s a 30 s). Un
+  broker caído no afecta a las rutas HTTP.
+- **Apagado ordenado:** al recibir `SIGTERM` deja de consumir y termina el mensaje en curso sin
+  cancelarle el contexto (si no, la consulta fallaría y gastaría un reintento); lo no procesado
+  vuelve a la cola. El apagado espera hasta 5 s, en conjunto con el worker de outbox.
+- **`GET /health/deps`:** reporta `deps.user_deleted_consumer` (`up` o `down`). Si está caído, 503
+  `degraded`. No afecta a `/ready`.
+- **Topología:** la declara solo `vinculo-vial-core` (la cola, su `.retry` y su `.dlq`).
+
+| Variable | Default | Descripción |
+|---|---|---|
+| `USER_DELETED_QUEUE` | `vehicle.user-deleted.q` | Cola de trabajo; debe coincidir con Core |
+| `RABBITMQ_PREFETCH` | `10` | Mensajes sin ack en vuelo (1 a 65535) |
+| `MAX_RETRIES` | `5` | Reintentos antes de la DLQ (≥ 0) |
 
 ## Comandos
 
@@ -157,6 +202,9 @@ go run ./cmd/api
 go test ./...
 # con un RabbitMQ disponible se ejecutan también las pruebas de integración del publisher:
 # TEST_RABBITMQ_URL=amqp://guest:guest@localhost:5672/ go test ./...
+# pruebas de integración del consumidor contra un RabbitMQ real (build tag `integration`;
+# con DATABASE_URL se prueba además la cadena completa hasta PostgreSQL):
+# TEST_RABBITMQ_URL=amqp://guest:guest@localhost:5672/ go test -tags integration ./internal/delivery/events/...
 CGO_ENABLED=0 go build -o vehicle ./cmd/api
 docker compose up --build
 ```

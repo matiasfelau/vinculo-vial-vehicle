@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/gin-gonic/gin"
@@ -95,5 +96,74 @@ func TestDepsHealthNoAfectaReady(t *testing.T) {
 
 	if rec.Code != http.StatusOK {
 		t.Fatalf("esperaba /ready 200 con circuito abierto y base sana, obtuvo %d", rec.Code)
+	}
+}
+
+func getDepsHealthConConsumidor(t *testing.T, estado string, consumidorArriba bool) (int, map[string]any) {
+	t.Helper()
+
+	gin.SetMode(gin.TestMode)
+	router := NewRouter(&fakeRegisterVehicleUseCase{}, &fakePingable{}, &fakeCircuitReporter{estado: estado},
+		DependencyCheck{Name: "user_deleted_consumer", Healthy: func() bool { return consumidorArriba }},
+	)
+
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/health/deps", nil))
+
+	var cuerpo map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &cuerpo); err != nil {
+		t.Fatalf("el cuerpo no es JSON: %v (%s)", err, rec.Body.String())
+	}
+	return rec.Code, cuerpo
+}
+
+func TestDepsHealthConsumidorConectadoRetorna200YLoReportaArriba(t *testing.T) {
+	codigo, cuerpo := getDepsHealthConConsumidor(t, "closed", true)
+
+	if codigo != http.StatusOK || cuerpo["status"] != "ok" {
+		t.Fatalf("esperaba 200 ok, obtuvo %d %v", codigo, cuerpo["status"])
+	}
+	deps, ok := cuerpo["deps"].(map[string]any)
+	if !ok || deps["user_deleted_consumer"] != "up" {
+		t.Fatalf("esperaba deps.user_deleted_consumer \"up\", obtuvo %v", cuerpo["deps"])
+	}
+}
+
+func TestDepsHealthConsumidorDesconectadoRetorna503Degraded(t *testing.T) {
+	codigo, cuerpo := getDepsHealthConConsumidor(t, "closed", false)
+
+	if codigo != http.StatusServiceUnavailable || cuerpo["status"] != "degraded" {
+		t.Fatalf("esperaba 503 degraded, obtuvo %d %v", codigo, cuerpo["status"])
+	}
+	deps, ok := cuerpo["deps"].(map[string]any)
+	if !ok || deps["user_deleted_consumer"] != "down" {
+		t.Fatalf("esperaba deps.user_deleted_consumer \"down\", obtuvo %v", cuerpo["deps"])
+	}
+}
+
+func TestDepsHealthConsumidorYCircuitoCaidosReportanAmbos(t *testing.T) {
+	codigo, cuerpo := getDepsHealthConConsumidor(t, "open", false)
+
+	if codigo != http.StatusServiceUnavailable {
+		t.Fatalf("esperaba 503, obtuvo %d", codigo)
+	}
+	mensaje, _ := cuerpo["error"].(string)
+	if !strings.Contains(mensaje, "identity") || !strings.Contains(mensaje, "user_deleted_consumer") {
+		t.Fatalf("el error debía nombrar ambas dependencias caídas, obtuvo %q", mensaje)
+	}
+}
+
+func TestDepsHealthConsumidorDesconectadoNoAfectaReady(t *testing.T) {
+	// Un consumidor sin broker no debe sacar a la instancia del balanceo.
+	gin.SetMode(gin.TestMode)
+	router := NewRouter(&fakeRegisterVehicleUseCase{}, &fakePingable{}, &fakeCircuitReporter{estado: "closed"},
+		DependencyCheck{Name: "user_deleted_consumer", Healthy: func() bool { return false }},
+	)
+
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/ready", nil))
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("esperaba /ready 200, obtuvo %d", rec.Code)
 	}
 }
