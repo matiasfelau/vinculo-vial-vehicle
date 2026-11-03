@@ -22,6 +22,7 @@ import (
 	"github.com/matiasfelau/vinculo-vial-vehicle/internal/service/lookup"
 	"github.com/matiasfelau/vinculo-vial-vehicle/internal/service/outbox"
 	"github.com/matiasfelau/vinculo-vial-vehicle/internal/service/sweeper"
+	"github.com/matiasfelau/vinculo-vial-vehicle/internal/service/userdeleted"
 	"github.com/matiasfelau/vinculo-vial-vehicle/internal/service/vehicle"
 	"github.com/matiasfelau/vinculo-vial-vehicle/pkg/config"
 )
@@ -38,10 +39,22 @@ const (
 	httpIdleTimeout       = 60 * time.Second
 	shutdownTimeout       = 10 * time.Second
 
-	// workerShutdownTimeout acota cuánto espera el apagado al lote en curso del
-	// worker de outbox.
-	workerShutdownTimeout = 5 * time.Second
+	// backgroundShutdownTimeout acota, en conjunto, cuánto espera el apagado al lote
+	// en curso del worker de outbox y al mensaje en curso del consumidor de
+	// user.deleted.
+	backgroundShutdownTimeout = 5 * time.Second
 )
+
+// awaitDone espera a que done se cierre o a que ctx venza, y en ese caso loguea
+// onTimeout. Los dos consumen el mismo presupuesto de tiempo, así que esperar a
+// varias tareas de fondo nunca excede el de ctx.
+func awaitDone(ctx context.Context, done <-chan struct{}, onTimeout string) {
+	select {
+	case <-done:
+	case <-ctx.Done():
+		log.Println(onTimeout)
+	}
+}
 
 // newEncryptors construye los dos cifradores HPKE de salida, cada uno con la
 // clave pública de su destinatario: dni hacia Identity (IDENTITY_HPKE_PUBLIC_KEY)
@@ -128,7 +141,12 @@ func main() {
 
 	resolveOwnersService := lookup.NewResolveOwnersService(repository, payloadDecryptor, plateEncryptor, []byte(cfg.PatHMACSecret), cfg.PendingDeliveryTTL)
 
-	router := httpdelivery.NewRouter(registerVehicleService, repository, identityVerifier)
+	userDeletedService := userdeleted.NewRemoveVehiclesService(repository)
+	userDeletedStatus := &events.ConnectionStatus{}
+
+	router := httpdelivery.NewRouter(registerVehicleService, repository, identityVerifier,
+		httpdelivery.DependencyCheck{Name: "user_deleted_consumer", Healthy: userDeletedStatus.Connected},
+	)
 	internalRouter := httpdelivery.NewInternalRouter(cfg.InternalServiceToken, resolveOwnersService)
 
 	publicServer := &http.Server{
@@ -173,6 +191,20 @@ func main() {
 		sweeper.NewPendingSweeper(repository).Run(ctx, cfg.SweeperInterval)
 	}()
 
+	// El consumidor de user.deleted (US-11) corre hasta la señal de apagado, con su
+	// propia conexión y reconexión: un broker caído no afecta a las rutas HTTP. Al
+	// recibir la señal termina el mensaje en curso; el resto vuelve a la cola.
+	consumerDone := make(chan struct{})
+	go func() {
+		defer close(consumerDone)
+		events.RunWithReconnect(ctx, cfg.RabbitMQURL, cfg.UserDeletedQueue, cfg.RabbitMQPrefetch, userDeletedStatus,
+			func(channel events.ConsumerChannel) *events.Consumer {
+				deadLetters := events.NewAMQPDeadLetterPublisher(channel, cfg.RabbitMQPublishTimeout)
+				handler := events.NewMessageHandler(events.NewUserDeletedProcessor(userDeletedService), deadLetters, cfg.UserDeletedQueue, cfg.MaxRetries)
+				return events.NewConsumer(channel, cfg.UserDeletedQueue, handler)
+			})
+	}()
+
 	if err := lifecycle.RunUntilSignal(ctx, []lifecycle.Server{publicServer, internalServer}, shutdownTimeout); err != nil {
 		log.Fatalf("error al iniciar el servidor HTTP: %v", err)
 	}
@@ -184,9 +216,8 @@ func main() {
 	// encolado por una petición en vuelo todavía alcance a publicarse. Lo que no
 	// llegue queda en el outbox y sale al reiniciar.
 	stopWorker()
-	select {
-	case <-workerDone:
-	case <-time.After(workerShutdownTimeout):
-		log.Println("el worker de outbox no terminó a tiempo; los eventos pendientes se reintentan al reiniciar")
-	}
+	background, cancelBackground := context.WithTimeout(context.Background(), backgroundShutdownTimeout)
+	defer cancelBackground()
+	awaitDone(background, workerDone, "el worker de outbox no terminó a tiempo; los eventos pendientes se reintentan al reiniciar")
+	awaitDone(background, consumerDone, "el consumidor de user.deleted no terminó a tiempo; el mensaje en vuelo se reentrega al reiniciar")
 }

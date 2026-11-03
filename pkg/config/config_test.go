@@ -287,3 +287,57 @@ func TestLoadParametrosDeRabbitMQInvalidosFallan(t *testing.T) {
 		})
 	}
 }
+
+func TestLoadConsumidorUserDeletedConValoresPorDefecto(t *testing.T) {
+	setEnvCompleto(t)
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("no se esperaba error: %v", err)
+	}
+	if cfg.UserDeletedQueue != "vehicle.user-deleted.q" {
+		t.Errorf("esperaba la cola por defecto vehicle.user-deleted.q, obtuvo %q", cfg.UserDeletedQueue)
+	}
+	if cfg.RabbitMQPrefetch != 10 {
+		t.Errorf("esperaba RABBITMQ_PREFETCH por defecto 10, obtuvo %d", cfg.RabbitMQPrefetch)
+	}
+	if cfg.MaxRetries != 5 {
+		t.Errorf("esperaba MAX_RETRIES por defecto 5, obtuvo %d", cfg.MaxRetries)
+	}
+}
+
+func TestLoadConsumidorUserDeletedConfigurablePorEnv(t *testing.T) {
+	setEnvCompleto(t)
+	t.Setenv("USER_DELETED_QUEUE", "vehicle.otra.q")
+	t.Setenv("RABBITMQ_PREFETCH", "3")
+	t.Setenv("MAX_RETRIES", "0")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("no se esperaba error: %v", err)
+	}
+	if cfg.UserDeletedQueue != "vehicle.otra.q" || cfg.RabbitMQPrefetch != 3 || cfg.MaxRetries != 0 {
+		t.Errorf("cola=%q prefetch=%d reintentos=%d", cfg.UserDeletedQueue, cfg.RabbitMQPrefetch, cfg.MaxRetries)
+	}
+}
+
+func TestLoadPrefetchYMaxRetriesInvalidos(t *testing.T) {
+	invalidos := []struct{ nombre, valor string }{
+		{"RABBITMQ_PREFETCH", "no-es-un-numero"},
+		{"RABBITMQ_PREFETCH", "0"},
+		{"RABBITMQ_PREFETCH", "-1"},
+		{"RABBITMQ_PREFETCH", "65536"},
+		{"MAX_RETRIES", "no-es-un-numero"},
+		{"MAX_RETRIES", "-1"},
+	}
+	for _, caso := range invalidos {
+		t.Run(caso.nombre+"="+caso.valor, func(t *testing.T) {
+			setEnvCompleto(t)
+			t.Setenv(caso.nombre, caso.valor)
+
+			if _, err := Load(); err == nil {
+				t.Fatalf("esperaba error con %s=%s", caso.nombre, caso.valor)
+			}
+		})
+	}
+}
