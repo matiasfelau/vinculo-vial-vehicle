@@ -5,8 +5,11 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"log"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"strings"
 	"testing"
 
 	"github.com/gin-gonic/gin"
@@ -18,6 +21,8 @@ import (
 type fakeResolveOwnersUseCase struct {
 	ownerIDs        []uuid.UUID
 	patEncIA        string
+	patEncAudit     string
+	auditKeyID      string
 	pendingRef      *uuid.UUID
 	err             error
 	receivedPatEnc  string
@@ -29,7 +34,13 @@ func (f *fakeResolveOwnersUseCase) ResolveOwners(ctx context.Context, patEnc str
 	f.fueInvocado = true
 	f.receivedPatEnc = patEnc
 	f.receivedAlertID = alertID
-	return domain.OwnerResolution{OwnerIDs: f.ownerIDs, PatEncIA: f.patEncIA, PendingRef: f.pendingRef}, f.err
+	return domain.OwnerResolution{
+		OwnerIDs:    f.ownerIDs,
+		PatEncIA:    f.patEncIA,
+		PatEncAudit: f.patEncAudit,
+		AuditKeyID:  f.auditKeyID,
+		PendingRef:  f.pendingRef,
+	}, f.err
 }
 
 // validBody arma un request válido; los casos de error lo parten a mano.
@@ -129,6 +140,88 @@ func TestResolveOwnerPatenteSinDuenosIncluyePendingRef(t *testing.T) {
 	}
 	if res.PendingRef == nil || *res.PendingRef != pendingRef {
 		t.Fatalf("esperaba pending_ref %v, obtuvo %v", pendingRef, res.PendingRef)
+	}
+}
+
+// pat_enc_audit y audit_key_id (US-11) van siempre, con y sin dueños, y no
+// desplazan a los campos existentes.
+func TestResolveOwnerIncluyePatEncAuditYAuditKeyIDConYSinDuenos(t *testing.T) {
+	casos := map[string][]uuid.UUID{
+		"con dueños": {uuid.New()},
+		"sin dueños": nil,
+	}
+
+	for nombre, owners := range casos {
+		t.Run(nombre, func(t *testing.T) {
+			gin.SetMode(gin.TestMode)
+			resolver := &fakeResolveOwnersUseCase{
+				ownerIDs:    owners,
+				patEncIA:    "cifrado-para-ia",
+				patEncAudit: "cifrado-para-audit",
+				auditKeyID:  "2026-11",
+			}
+			router := NewInternalRouter(secretoDePrueba, resolver)
+
+			rec := httptest.NewRecorder()
+			router.ServeHTTP(rec, resolveOwnerRequestBody(t, validBody()))
+
+			if rec.Code != http.StatusOK {
+				t.Fatalf("esperaba 200, obtuvo %d (%s)", rec.Code, rec.Body.String())
+			}
+			var res map[string]any
+			if err := json.Unmarshal(rec.Body.Bytes(), &res); err != nil {
+				t.Fatalf("la respuesta no es JSON: %v", err)
+			}
+			if res["pat_enc_audit"] != "cifrado-para-audit" {
+				t.Fatalf("esperaba pat_enc_audit, obtuvo %v", res["pat_enc_audit"])
+			}
+			if res["audit_key_id"] != "2026-11" {
+				t.Fatalf("esperaba audit_key_id, obtuvo %v", res["audit_key_id"])
+			}
+			if res["pat_enc_ia"] != "cifrado-para-ia" {
+				t.Fatalf("pat_enc_ia no debía cambiar, obtuvo %v", res["pat_enc_ia"])
+			}
+			if _, ok := res["owner_ids"].([]any); !ok {
+				t.Fatalf("owner_ids debía seguir siendo un array, obtuvo %v", res["owner_ids"])
+			}
+		})
+	}
+}
+
+// Ni la patente ni los criptogramas deben llegar a los logs, en éxito ni en error.
+func TestResolveOwnerNoLogueaLaPatenteNiLosCriptogramas(t *testing.T) {
+	const (
+		patente     = "AB123CD"
+		patEnc      = "cripto-de-entrada-secreto"
+		patEncIA    = "cripto-ia-secreto"
+		patEncAudit = "cripto-audit-secreto"
+	)
+	casos := map[string]error{
+		"éxito":              nil,
+		"error interno":      errors.New("fallo de cifrado"),
+		"base no disponible": domain.ErrRepositoryUnavailable,
+		"patente inválida":   domain.ErrInvalidPlate,
+	}
+
+	for nombre, errCasoDeUso := range casos {
+		t.Run(nombre, func(t *testing.T) {
+			gin.SetMode(gin.TestMode)
+			var logs bytes.Buffer
+			log.SetOutput(&logs)
+			t.Cleanup(func() { log.SetOutput(os.Stderr) })
+
+			resolver := &fakeResolveOwnersUseCase{patEncIA: patEncIA, patEncAudit: patEncAudit, auditKeyID: "2026-11", err: errCasoDeUso}
+			router := NewInternalRouter(secretoDePrueba, resolver)
+			body := map[string]string{"pat_enc": patEnc, "alert_id": uuid.NewString()}
+
+			router.ServeHTTP(httptest.NewRecorder(), resolveOwnerRequestBody(t, body))
+
+			for _, secreto := range []string{patente, patEnc, patEncIA, patEncAudit} {
+				if strings.Contains(logs.String(), secreto) {
+					t.Fatalf("el log no debía contener %q: %s", secreto, logs.String())
+				}
+			}
+		})
 	}
 }
 

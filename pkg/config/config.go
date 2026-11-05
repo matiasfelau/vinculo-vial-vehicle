@@ -25,6 +25,10 @@ const defaultUserDeletedQueue = "vehicle.user-deleted.q"
 // protocolo es de 16 bits y un valor mayor se truncaría en silencio.
 const maxRabbitMQPrefetch = 65535
 
+// maxAuditKeyIDLength es el largo máximo de AUDIT_KEY_ID: Audit lo guarda en
+// audit_records.audit_key_id, que es varchar(32).
+const maxAuditKeyIDLength = 32
+
 // Config agrupa los parámetros de configuración requeridos por el servicio.
 type Config struct {
 	Port                  string
@@ -38,8 +42,15 @@ type Config struct {
 	IdentityHPKEPublicKey string
 	IAHPKEPublicKey       string
 	MockDNRPAOwnerDNI     string
-	InternalServiceToken  string
-	EphemeralDB           bool
+
+	// AuditPublicKey y AuditKeyID (US-11) son la clave pública X25519 (base64) de
+	// Audit y el id corto con el que Audit identifica su par. Deben ser iguales a los
+	// de Identity. La clave privada no la carga ningún servicio.
+	AuditPublicKey string
+	AuditKeyID     string
+
+	InternalServiceToken string
+	EphemeralDB          bool
 
 	// Parámetros del circuit breaker hacia identity (ver internal/breaker).
 	IdentityCBFailureThreshold int
@@ -98,6 +109,8 @@ func Load() (*Config, error) {
 		IdentityHPKEPublicKey: os.Getenv("IDENTITY_HPKE_PUBLIC_KEY"),
 		IAHPKEPublicKey:       os.Getenv("IA_HPKE_PUBLIC_KEY"),
 		MockDNRPAOwnerDNI:     os.Getenv("MOCK_DNRPA_OWNER_DNI"),
+		AuditPublicKey:        os.Getenv("AUDIT_PUBLIC_KEY"),
+		AuditKeyID:            os.Getenv("AUDIT_KEY_ID"),
 		InternalServiceToken:  os.Getenv("INTERNAL_SERVICE_TOKEN"),
 		RabbitMQURL:           os.Getenv("RABBITMQ_URL"),
 		RabbitMQExchange:      os.Getenv("RABBITMQ_EXCHANGE"),
@@ -252,6 +265,15 @@ func Load() (*Config, error) {
 	}
 	if cfg.IAHPKEPublicKey == "" {
 		return nil, fmt.Errorf("config: IA_HPKE_PUBLIC_KEY es obligatoria")
+	}
+	if cfg.AuditPublicKey == "" {
+		return nil, fmt.Errorf("config: AUDIT_PUBLIC_KEY es obligatoria")
+	}
+	if cfg.AuditKeyID == "" {
+		return nil, fmt.Errorf("config: AUDIT_KEY_ID es obligatoria")
+	}
+	if len(cfg.AuditKeyID) > maxAuditKeyIDLength {
+		return nil, fmt.Errorf("config: AUDIT_KEY_ID no puede superar %d caracteres", maxAuditKeyIDLength)
 	}
 	if cfg.RabbitMQURL == "" {
 		return nil, fmt.Errorf("config: RABBITMQ_URL es obligatoria")

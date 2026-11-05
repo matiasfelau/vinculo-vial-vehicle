@@ -63,7 +63,8 @@ Ver [.env.example](.env.example) para el detalle de las variables de entorno req
 
 ```
 req:  { "pat_enc": "<base64>", "alert_id": "uuid" }
-res:  200 { "owner_ids": ["uuid", ...], "pat_enc_ia": "<base64>", "pending_ref": "uuid" }
+res:  200 { "owner_ids": ["uuid", ...], "pat_enc_ia": "<base64>", "pending_ref": "uuid",
+            "pat_enc_audit": "<base64>", "audit_key_id": "<string>" }
       400 criptograma, formato de patente o alert_id inválidos · 503 base no disponible
 ```
 
@@ -71,10 +72,47 @@ res:  200 { "owner_ids": ["uuid", ...], "pat_enc_ia": "<base64>", "pending_ref":
   `info = alert_id`. Se devuelve **siempre**, también cuando `owner_ids` está vacío
   (US-10): el emisor nunca se entera de si la patente tiene dueños, e IA valida la
   alerta igual.
+- `pat_enc_audit` y `audit_key_id` (US-11) también se devuelven **siempre**, con o sin
+  dueños y con o sin `pending_ref`. Ver "Sellado de la patente para Audit".
 - `owner_ids` vacío (`[]`, nunca `null`) es un resultado válido, no un error.
 - `pending_ref` solo se devuelve cuando `owner_ids` está vacío (ver "Patentes pendientes").
 - La patente en claro se purga de memoria en todos los caminos. Ni la patente, ni
-  `pat_enc`, ni `pat_enc_ia`, ni el Blind Index se loguean.
+  `pat_enc`, ni `pat_enc_ia`, ni `pat_enc_audit`, ni el Blind Index se loguean.
+
+### Sellado de la patente para Audit (US-11)
+
+`pat_enc_audit` es la patente canónica, la misma con la que se calcula el Blind Index y se
+genera `pat_enc_ia`, sellada con HPKE hacia la clave pública de Audit
+(`AUDIT_PUBLIC_KEY`). El formato es el de `pat_enc_ia`: base64 estándar de `enc‖ct`, con la
+suite DHKEM(X25519, HKDF-SHA256) / HKDF-SHA256 / AES-256-GCM en modo base.
+
+| Campo | Valor |
+|---|---|
+| `info` HPKE | UTF-8 de `"vv-audit:pat:" + alert_id` |
+| Texto plano | Patente canónica |
+| `audit_key_id` | `AUDIT_KEY_ID`: identifica la clave pública usada, para que la apertura sepa qué clave privada aplicar si se rota |
+
+- **Atado a la alerta y al campo:** si el criptograma se mueve a otro registro, o se
+  intercambia con el del DNI (que Identity sella con `info = "vv-audit:dni:" + alert_id`),
+  la apertura falla.
+- **Instancia propia:** usa un cifrador independiente del de IA, construido con
+  `AUDIT_PUBLIC_KEY`. Cada llamada produce un criptograma nuevo.
+- **Todo o nada:** si el cifrado falla, la respuesta es un error interno (500) sin ningún
+  campo parcial.
+- **No se persiste:** Vehicle no guarda el criptograma ni la patente en claro. `vehicles` sigue
+  con `pat_hashed` y `pat_aes`, y `pending_plates` con `plate_hmac`. Alert lo lleva a Audit por
+  su outbox.
+- **Audit nunca descifra:** guarda el criptograma tal como llega. La clave privada la genera
+  `audit-keygen` (repo de Audit), la custodia el responsable legal fuera de línea y no la carga
+  ningún servicio, Vehicle incluido.
+
+| Variable | Descripción |
+|---|---|
+| `AUDIT_PUBLIC_KEY` | Clave pública X25519 de Audit, en base64 (32 bytes). Obligatoria |
+| `AUDIT_KEY_ID` | Id corto del par de claves (hasta 32 caracteres, por ejemplo `2026-11`). Obligatoria |
+
+Los dos valores tienen que ser iguales en Vehicle e Identity. Son fail-fast: sin ellos, o con
+una clave que no decodifica a 32 bytes, el servicio no arranca.
 
 ## Patentes pendientes de entrega (US-10)
 
