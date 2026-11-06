@@ -1,6 +1,7 @@
 package config
 
 import (
+	"strings"
 	"testing"
 	"time"
 )
@@ -16,6 +17,8 @@ func setEnvCompleto(t *testing.T) {
 		"PAT_HMAC_SECRET":          "clave-de-prueba",
 		"IDENTITY_HPKE_PUBLIC_KEY": "clave-de-prueba",
 		"IA_HPKE_PUBLIC_KEY":       "clave-de-prueba-ia",
+		"AUDIT_PUBLIC_KEY":         "clave-de-prueba-audit",
+		"AUDIT_KEY_ID":             "2026-11",
 		"MOCK_DNRPA_OWNER_DNI":     "12345678",
 		"INTERNAL_SERVICE_TOKEN":   "token-de-prueba",
 		"RABBITMQ_URL":             "amqp://guest:guest@localhost:5672/",
@@ -65,6 +68,26 @@ func TestLoadConConfiguracionCompleta(t *testing.T) {
 	}
 	if cfg.IAHPKEPublicKey != "clave-de-prueba-ia" {
 		t.Errorf("esperaba IA_HPKE_PUBLIC_KEY cargada, obtuvo %q", cfg.IAHPKEPublicKey)
+	}
+	if cfg.AuditPublicKey != "clave-de-prueba-audit" {
+		t.Errorf("esperaba AUDIT_PUBLIC_KEY cargada, obtuvo %q", cfg.AuditPublicKey)
+	}
+	if cfg.AuditKeyID != "2026-11" {
+		t.Errorf("esperaba AUDIT_KEY_ID cargada, obtuvo %q", cfg.AuditKeyID)
+	}
+}
+
+func TestLoadAuditKeyIDMasLargoQueLaColumnaDeAuditFalla(t *testing.T) {
+	setEnvCompleto(t)
+	t.Setenv("AUDIT_KEY_ID", strings.Repeat("k", 33))
+
+	if _, err := Load(); err == nil {
+		t.Fatal("esperaba error con un AUDIT_KEY_ID de más de 32 caracteres")
+	}
+
+	t.Setenv("AUDIT_KEY_ID", strings.Repeat("k", 32))
+	if _, err := Load(); err != nil {
+		t.Fatalf("un AUDIT_KEY_ID de 32 caracteres debía aceptarse: %v", err)
 	}
 }
 
@@ -182,6 +205,8 @@ func TestLoadFallaSinVariablesObligatorias(t *testing.T) {
 		"PAT_HMAC_SECRET",
 		"IDENTITY_HPKE_PUBLIC_KEY",
 		"IA_HPKE_PUBLIC_KEY",
+		"AUDIT_PUBLIC_KEY",
+		"AUDIT_KEY_ID",
 		"MOCK_DNRPA_OWNER_DNI",
 		"INTERNAL_SERVICE_TOKEN",
 	}

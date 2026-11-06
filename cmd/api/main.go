@@ -56,21 +56,37 @@ func awaitDone(ctx context.Context, done <-chan struct{}, onTimeout string) {
 	}
 }
 
-// newEncryptors construye los dos cifradores HPKE de salida, cada uno con la
-// clave pública de su destinatario: dni hacia Identity (IDENTITY_HPKE_PUBLIC_KEY)
-// y plate hacia IA (IA_HPKE_PUBLIC_KEY). Una clave inválida hace fallar el arranque.
-func newEncryptors(cfg *config.Config) (dni, plate *hpke.Encryptor, err error) {
-	dni, err = hpke.NewEncryptor(cfg.IdentityHPKEPublicKey)
+// encryptors agrupa los cifradores HPKE de salida, cada uno construido con la
+// clave pública de su destinatario. Son instancias independientes: cruzar una
+// clave enviaría el dato a quien no corresponde.
+type encryptors struct {
+	// dni cifra el DNI hacia Identity (IDENTITY_HPKE_PUBLIC_KEY).
+	dni *hpke.Encryptor
+	// plate cifra la patente hacia IA (IA_HPKE_PUBLIC_KEY).
+	plate *hpke.Encryptor
+	// audit cifra la patente hacia Audit (AUDIT_PUBLIC_KEY).
+	audit *hpke.Encryptor
+}
+
+// newEncryptors construye los cifradores HPKE de salida. Una clave inválida, por
+// ejemplo una que no decodifica a 32 bytes, hace fallar el arranque.
+func newEncryptors(cfg *config.Config) (encryptors, error) {
+	dni, err := hpke.NewEncryptor(cfg.IdentityHPKEPublicKey)
 	if err != nil {
-		return nil, nil, fmt.Errorf("cifrador hacia identity: %w", err)
+		return encryptors{}, fmt.Errorf("cifrador hacia identity: %w", err)
 	}
 
-	plate, err = hpke.NewEncryptor(cfg.IAHPKEPublicKey)
+	plate, err := hpke.NewEncryptor(cfg.IAHPKEPublicKey)
 	if err != nil {
-		return nil, nil, fmt.Errorf("cifrador hacia ia: %w", err)
+		return encryptors{}, fmt.Errorf("cifrador hacia ia: %w", err)
 	}
 
-	return dni, plate, nil
+	audit, err := hpke.NewEncryptor(cfg.AuditPublicKey)
+	if err != nil {
+		return encryptors{}, fmt.Errorf("cifrador hacia audit: %w", err)
+	}
+
+	return encryptors{dni: dni, plate: plate, audit: audit}, nil
 }
 
 func main() {
@@ -84,7 +100,7 @@ func main() {
 		log.Fatalf("no se pudo inicializar el desencriptador HPKE: %v", err)
 	}
 
-	dniEncryptor, plateEncryptor, err := newEncryptors(cfg)
+	outboundEncryptors, err := newEncryptors(cfg)
 	if err != nil {
 		log.Fatalf("no se pudieron inicializar los cifradores HPKE: %v", err)
 	}
@@ -134,12 +150,12 @@ func main() {
 		identityVerifier,
 		dnrpaClient,
 		payloadDecryptor,
-		dniEncryptor,
+		outboundEncryptors.dni,
 		plateCipher,
 		[]byte(cfg.PatHMACSecret),
 	)
 
-	resolveOwnersService := lookup.NewResolveOwnersService(repository, payloadDecryptor, plateEncryptor, []byte(cfg.PatHMACSecret), cfg.PendingDeliveryTTL)
+	resolveOwnersService := lookup.NewResolveOwnersService(repository, payloadDecryptor, outboundEncryptors.plate, outboundEncryptors.audit, cfg.AuditKeyID, []byte(cfg.PatHMACSecret), cfg.PendingDeliveryTTL)
 
 	userDeletedService := userdeleted.NewRemoveVehiclesService(repository)
 	userDeletedStatus := &events.ConnectionStatus{}
