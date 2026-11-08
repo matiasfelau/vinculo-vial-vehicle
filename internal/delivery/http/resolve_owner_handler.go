@@ -27,10 +27,14 @@ type resolveOwnerRequest struct {
 // resolveOwnerResponse es la respuesta de /internal/resolve-owner. PatEncIA va
 // siempre, también cuando owner_ids está vacío: IA valida la patente igual.
 // PendingRef solo va cuando la patente no tiene dueños (US-10) y se omite si no.
+// PatEncAudit y AuditKeyID (US-11) también van siempre: Alert los lleva a Audit
+// por el outbox y nunca los guarda en tablas de dominio.
 type resolveOwnerResponse struct {
-	OwnerIDs   []uuid.UUID `json:"owner_ids"`
-	PatEncIA   string      `json:"pat_enc_ia"`
-	PendingRef *uuid.UUID  `json:"pending_ref,omitempty"`
+	OwnerIDs    []uuid.UUID `json:"owner_ids"`
+	PatEncIA    string      `json:"pat_enc_ia"`
+	PendingRef  *uuid.UUID  `json:"pending_ref,omitempty"`
+	PatEncAudit string      `json:"pat_enc_audit"`
+	AuditKeyID  string      `json:"audit_key_id"`
 }
 
 // ResolveOwnerHandler expone POST /internal/resolve-owner sobre el router
@@ -39,9 +43,10 @@ type resolveOwnerResponse struct {
 // 401 por su cuenta, ni aplica ninguna regla de negocio sobre quién pregunta.
 //
 // El request exige pat_enc y alert_id (UUID). La respuesta es siempre
-// {owner_ids: [...], pat_enc_ia: "...", pending_ref?: "..."}, con un array vacío
-// (nunca null) cuando la patente no está en la red: es un resultado válido, no
-// un error. pending_ref solo acompaña a un owner_ids vacío.
+// {owner_ids: [...], pat_enc_ia: "...", pending_ref?: "...", pat_enc_audit: "...",
+// audit_key_id: "..."}, con un array vacío (nunca null) cuando la patente no está
+// en la red: es un resultado válido, no un error. pending_ref solo acompaña a un
+// owner_ids vacío.
 func ResolveOwnerHandler(useCase resolveOwnersUseCase) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		var req resolveOwnerRequest
@@ -68,7 +73,13 @@ func ResolveOwnerHandler(useCase resolveOwnersUseCase) gin.HandlerFunc {
 			ownerIDs = []uuid.UUID{}
 		}
 
-		c.JSON(http.StatusOK, resolveOwnerResponse{OwnerIDs: ownerIDs, PatEncIA: resolution.PatEncIA, PendingRef: resolution.PendingRef})
+		c.JSON(http.StatusOK, resolveOwnerResponse{
+			OwnerIDs:    ownerIDs,
+			PatEncIA:    resolution.PatEncIA,
+			PendingRef:  resolution.PendingRef,
+			PatEncAudit: resolution.PatEncAudit,
+			AuditKeyID:  resolution.AuditKeyID,
+		})
 	}
 }
 
