@@ -1,0 +1,6 @@
+# Excepciones de Trivy. Cada una lleva un comentario con el motivo y hasta cuándo.
+# Formato:
+#   # Motivo. Vence: AAAA-MM-DD
+#   CVE-XXXX-NNNN
+#
+# Hoy no hay excepciones.

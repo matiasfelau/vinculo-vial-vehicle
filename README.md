@@ -266,3 +266,50 @@ Sin `container_name` explícito, Compose deriva el nombre del contenedor del dir
 proyecto más un sufijo numérico (`vinculo-vial-vehicle-vinculo-vial-vehicle-1`), que no
 coincide con el nombre que el resto de la plataforma espera resolver por DNS sobre la red
 compartida.
+
+## CI
+
+`.github/workflows/ci.yml` corre en todo `pull_request` hacia `dev` o `main` (y en los push a esas ramas). Tiene dos jobs:
+
+- **`build-and-test`**: compila, `go vet`, y corre las pruebas con cobertura contra un PostgreSQL y un RabbitMQ reales (servicios del job). Une el perfil de las pruebas unitarias con el de `-tags=integration` en un único reporte (`gocovmerge`) y lo convierte a Cobertura XML (`gocover-cobertura`).
+  - **Cobertura total**: va a `$GITHUB_STEP_SUMMARY` y al artefacto `cobertura`. No corta el job. Cuando todos los repos lleguen al 85 % (v0.14), el gate pasa a ser sobre el total.
+  - **Gate sobre el código nuevo**: `diff-cover` exige al menos 85 % de cobertura en las líneas que el PR cambia respecto de `origin/dev`. Por eso el checkout usa `fetch-depth: 0`.
+- **`security`**: `govulncheck` (falla ante vulnerabilidades alcanzables), Trivy `fs` (HIGH y CRITICAL con corrección disponible, secretos y configuración) y Semgrep. Semgrep es solo informativo por ahora: deja el resultado en el resumen y en el artefacto `semgrep`, y pasa a gate en v0.14.
+
+**Exclusiones de cobertura:** ninguna. El repo no tiene código generado y no se excluye código escrito a mano.
+
+**Excepciones de Trivy:** solo en `.trivyignore`, cada una con un comentario que diga por qué y hasta cuándo.
+
+**Higiene:** el workflow tiene `permissions: contents: read`, las acciones de terceros están fijadas por SHA de commit (con la versión en un comentario) y `.github/dependabot.yml` revisa semanalmente `gomod`, `github-actions` y `docker`.
+
+### Correr los chequeos en local
+
+Con un PostgreSQL y un RabbitMQ levantados (por ejemplo con `docker run`) y las variables apuntando a ellos:
+
+```bash
+export DATABASE_URL='postgres://vehicle:vehicle@localhost:5432/vehicle?sslmode=disable'
+export TEST_RABBITMQ_URL='amqp://guest:guest@localhost:5672/'
+
+# herramientas (las mismas versiones que el workflow, ver el bloque env de ci.yml)
+go install github.com/wadey/gocovmerge@b5bfa59ec0ad
+go install github.com/boumenot/gocover-cobertura@v1.5.0
+go install golang.org/x/vuln/cmd/govulncheck@v1.9.0
+pip install diff-cover==11.0.1
+
+# cobertura: unitarias + integración, unidas
+go test ./... -covermode=atomic -coverpkg=./... -coverprofile=coverage-unit.out
+go test ./... -tags=integration -covermode=atomic -coverpkg=./... -coverprofile=coverage-integration.out
+gocovmerge coverage-unit.out coverage-integration.out > coverage.out
+gocover-cobertura < coverage.out > coverage.xml
+go tool cover -func=coverage.out | tail -1          # cobertura total
+
+# gate sobre el código nuevo (necesita origin/dev actualizado: git fetch origin dev)
+diff-cover coverage.xml --compare-branch=origin/dev --fail-under=85
+
+# seguridad
+govulncheck ./...
+trivy fs --scanners vuln,secret,misconfig --severity HIGH,CRITICAL --ignore-unfixed --exit-code 1 .
+semgrep scan --config p/default --metrics=off
+```
+
+Si no hay PostgreSQL ni RabbitMQ, las pruebas que los necesitan se omiten solas y la cobertura que se mide es menor que la de CI.
