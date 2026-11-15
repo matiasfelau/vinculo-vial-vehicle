@@ -273,7 +273,7 @@ compartida.
 
 - **`build-and-test`**: compila, `go vet`, y corre las pruebas con cobertura contra un PostgreSQL y un RabbitMQ reales (servicios del job). Une el perfil de las pruebas unitarias con el de `-tags=integration` en un único reporte (`gocovmerge`) y lo convierte a Cobertura XML (`gocover-cobertura`).
   - **Cobertura total**: va a `$GITHUB_STEP_SUMMARY` y al artefacto `cobertura`. No corta el job. Cuando todos los repos lleguen al 85 % (v0.14), el gate pasa a ser sobre el total.
-  - **Gate sobre el código nuevo**: `diff-cover` exige al menos 85 % de cobertura en las líneas que el PR cambia respecto de `origin/dev`. Por eso el checkout usa `fetch-depth: 0`.
+  - **Gate sobre el código nuevo**: `diff-cover` exige al menos 85 % de cobertura en las líneas que el PR cambia respecto de la rama base del PR (`github.base_ref`, pasada por variable de entorno `BASE_REF`). Por eso el checkout usa `fetch-depth: 0`.
 - **`security`**: `govulncheck` (falla ante vulnerabilidades alcanzables), Trivy `fs` (HIGH y CRITICAL con corrección disponible, secretos y configuración) y Semgrep. Semgrep es solo informativo por ahora: deja el resultado en el resumen y en el artefacto `semgrep`, y pasa a gate en v0.14.
 
 **Exclusiones de cobertura:** ninguna. El repo no tiene código generado y no se excluye código escrito a mano.
@@ -303,7 +303,7 @@ gocovmerge coverage-unit.out coverage-integration.out > coverage.out
 gocover-cobertura < coverage.out > coverage.xml
 go tool cover -func=coverage.out | tail -1          # cobertura total
 
-# gate sobre el código nuevo (necesita origin/dev actualizado: git fetch origin dev)
+# gate sobre el código nuevo (necesita la rama base actualizada: git fetch origin dev)
 diff-cover coverage.xml --compare-branch=origin/dev --fail-under=85
 
 # seguridad
