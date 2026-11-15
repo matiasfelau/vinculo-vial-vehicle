@@ -18,8 +18,20 @@ type fakeRepository struct {
 	propuesta       domain.PendingProposal
 }
 
-func (f *fakeRepository) Create(ctx context.Context, vehicle *domain.Vehicle) error {
-	return nil
+func (f *fakeRepository) Create(ctx context.Context, vehicle *domain.Vehicle, maxPerOwner int) (int, error) {
+	return 0, nil
+}
+
+func (f *fakeRepository) CountByOwner(ctx context.Context, ownerID uuid.UUID) (int, error) {
+	return 0, nil
+}
+
+func (f *fakeRepository) DeleteByOwnerAndPlate(ctx context.Context, ownerID uuid.UUID, patHashed string) (int, error) {
+	return 0, nil
+}
+
+func (f *fakeRepository) DeleteByOwner(ctx context.Context, ownerID uuid.UUID) (int64, error) {
+	return 0, nil
 }
 
 func (f *fakeRepository) FindOwnersOrReservePending(ctx context.Context, patHashed string, proposal domain.PendingProposal) ([]uuid.UUID, *uuid.UUID, error) {

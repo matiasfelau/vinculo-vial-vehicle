@@ -47,7 +47,7 @@ func TestCreatePrimerDuenoConPendienteVigenteBorraLaFilaYEncolaElEvento(t *testi
 	ahora := time.Now().UTC()
 	ref := reservar(t, repo, patHashed, ahora)
 
-	if err := repo.Create(context.Background(), nuevoVehiculo(ownerID, patHashed, ahora)); err != nil {
+	if err := crear(repo, nuevoVehiculo(ownerID, patHashed, ahora)); err != nil {
 		t.Fatalf("no se esperaba error: %v", err)
 	}
 
@@ -78,7 +78,7 @@ func TestCreateSinPendienteNoEncolaNingunEvento(t *testing.T) {
 	db := setupTestDB(t)
 	repo := NewVehicleRepository(db)
 
-	if err := repo.Create(context.Background(), nuevoVehiculo(uuid.New(), uuid.NewString(), time.Now().UTC())); err != nil {
+	if err := crear(repo, nuevoVehiculo(uuid.New(), uuid.NewString(), time.Now().UTC())); err != nil {
 		t.Fatalf("no se esperaba error: %v", err)
 	}
 
@@ -98,7 +98,7 @@ func TestCreateConPendienteVencidoBorraLaFilaSinEvento(t *testing.T) {
 	ahora := time.Now().UTC()
 	ref := reservar(t, repo, patHashed, ahora.Add(-2*ventanaDePrueba))
 
-	if err := repo.Create(context.Background(), nuevoVehiculo(uuid.New(), patHashed, ahora)); err != nil {
+	if err := crear(repo, nuevoVehiculo(uuid.New(), patHashed, ahora)); err != nil {
 		t.Fatalf("no se esperaba error: %v", err)
 	}
 
@@ -124,7 +124,7 @@ func TestCreateDuplicadoRevierteLaTransaccionYConservaLaReserva(t *testing.T) {
 		t.Fatalf("no se pudo armar la reserva: %v", err)
 	}
 
-	err := repo.Create(context.Background(), nuevoVehiculo(ownerID, patHashed, ahora))
+	err := crear(repo, nuevoVehiculo(ownerID, patHashed, ahora))
 
 	if !errors.Is(err, domain.ErrDuplicateVehicle) {
 		t.Fatalf("esperaba domain.ErrDuplicateVehicle, obtuvo %v", err)
@@ -157,7 +157,7 @@ func TestCreateFalloAlEncolarRevierteElVehiculo(t *testing.T) {
 	}
 	t.Cleanup(restaurar)
 
-	err := repo.Create(context.Background(), nuevoVehiculo(uuid.New(), patHashed, ahora))
+	err := crear(repo, nuevoVehiculo(uuid.New(), patHashed, ahora))
 	restaurar()
 
 	if err == nil {
@@ -196,7 +196,7 @@ func TestCreateConcurrenteDeDosDuenosGeneraUnUnicoEvento(t *testing.T) {
 		go func() {
 			defer wg.Done()
 			<-inicio
-			if err := repo.Create(context.Background(), nuevoVehiculo(uuid.New(), patHashed, time.Now().UTC())); err != nil {
+			if err := crear(repo, nuevoVehiculo(uuid.New(), patHashed, time.Now().UTC())); err != nil {
 				mu.Lock()
 				errs = append(errs, err)
 				mu.Unlock()
@@ -246,7 +246,7 @@ func TestResolveYCreateConcurrentesNoDejanReservaHuerfana(t *testing.T) {
 		go func() {
 			defer wg.Done()
 			<-inicio
-			createErr = repo.Create(context.Background(), nuevoVehiculo(uuid.New(), patHashed, time.Now().UTC()))
+			createErr = crear(repo, nuevoVehiculo(uuid.New(), patHashed, time.Now().UTC()))
 		}()
 		close(inicio)
 		wg.Wait()

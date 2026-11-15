@@ -1,29 +1,80 @@
 # vinculo-vial-vehicle
 
-Servicio de vinculación de vehículos de la plataforma Vínculo Vial. Expone el alta de
-vehículos asociados a un usuario, validando la propiedad del vehículo contra el servicio
-Identity antes de persistir la vinculación.
+Servicio de vinculación de vehículos de la plataforma Vínculo Vial. Vincula usuarios con
+patentes (US-14): el usuario escribe el dominio a mano y el sistema **no verifica la
+titularidad**. Cada usuario puede tener hasta `VEHICLE_MAX_PER_USER` vehículos.
 
 ## Responsabilidades
 
-- Recibir un único criptograma (`payload_enc`, HPKE) con los datos del vehículo
-  escaneados del QR (patente, chasis).
-- Consultar la titularidad del vehículo contra el registro automotor (DNRPA) a partir
-  de la patente, obteniendo el DNI del titular legal.
-- Cifrar ese DNI con la clave pública HPKE de Identity y verificar la propiedad contra
-  `vinculo-vial-identity` por red interna.
-- Desencriptar, validar, calcular el Blind Index y cifrar la patente en reposo.
-- Persistir la vinculación `(owner_id, patente)` respetando la regla de unicidad compuesta.
-- No expone ninguna consulta pública de existencia de patentes. Quien necesita saber si una
-  patente está registrada (Alert, al recibir un intento de alerta) lo pregunta por
-  `/internal/resolve-owner`, en la red interna.
+- Vincular una patente al usuario de la sesión. Recibe un único criptograma (`payload_enc`,
+  HPKE) con `{ "patente" }`; si trae `chasis`, se ignora.
+- Desencriptar, validar el formato (`AAA999` o `AA999AA`), calcular el Blind Index y cifrar la
+  patente en reposo.
+- Aplicar el tope por usuario y la regla de unicidad `(owner_id, patente)`.
+- Desvincular una patente que el usuario vuelve a escribir, o todas juntas.
+- Reclamar las alertas pendientes de la patente al vincularla (US-10).
+- Resolver los dueños de una patente para Alert por `/internal/resolve-owner`, en la red
+  interna. No expone ninguna consulta pública de existencia de patentes.
+- Sellar la patente para Audit y borrar los vehículos de un usuario dado de baja (US-11).
+
+## Vinculación por dominio (US-14)
+
+**Riesgo aceptado.** La patente se vincula sin verificar la titularidad, porque el Estado no
+ofrece a los privados un servicio para validarla. Un tercero puede vincular la patente de otra
+persona y recibir sus alertas, incluidas las pendientes; rotar vinculaciones (vincular, recibir,
+desvincular, vincular otra) cae en el mismo riesgo. Se acepta porque las fotos, tomadas a 1–2 m
+del vehículo, dan muy poca información del lugar. La mitigación es el tope de
+`VEHICLE_MAX_PER_USER` (3 por defecto) vehículos por usuario.
+
+**Privacidad.** Ninguna respuesta devuelve patentes: la app solo sabe cuántos vehículos tiene
+vinculados el usuario, nunca cuáles. Para desvincular una, hay que volver a escribirla; quien
+acceda a una sesión ajena no puede ver qué vehículos tiene esa persona. Ni la patente ni el
+criptograma se loguean.
 
 ## Endpoints públicos
 
-| Método y path | Descripción |
-|---|---|
-| `POST /api/v1/vehicles` | Alta de la vinculación `(owner_id, patente)`. |
-| `GET /health`, `GET /ready`, `GET /health/deps` | Salud del servicio y de sus dependencias. |
+Pasan por Kong, que inyecta `X-User-Id`. La patente viaja siempre en `payload_enc`, cifrada con HPKE
+contra la clave pública de Vehicle.
+
+| Método y path | Body | Respuesta |
+|---|---|---|
+| `POST /api/v1/vehicles` | `{ "payload_enc" }` (payload `{ "patente" }`) | `201 { "count", "max" }` |
+| `GET /api/v1/vehicles` | — | `200 { "count", "max" }` |
+| `POST /api/v1/vehicles/unlink` | `{ "payload_enc" }` (payload `{ "patente" }`) | `200 { "count", "max" }` |
+| `DELETE /api/v1/vehicles` | — | `204`: desvincula todos los vehículos del usuario |
+| `GET /health`, `GET /ready`, `GET /health/deps` | — | Salud del servicio y de sus dependencias |
+
+`count` es cuántos vehículos tiene vinculados el usuario y `max` es `VEHICLE_MAX_PER_USER`.
+
+**Errores.** Todos llevan `{ "error": "<mensaje>", "code": "<CODE>" }`; la app mapea por `code`.
+
+| Status | `code` | Caso |
+|---|---|---|
+| 400 | `INVALID_PLATE` | Criptograma inválido, cuerpo mal formado o formato de patente inválido |
+| 401 | `UNAUTHORIZED` | `X-User-Id` ausente o inválido |
+| 404 | `VEHICLE_NOT_FOUND` | `unlink` de una patente que el usuario no tiene vinculada (aunque la tenga otro usuario) |
+| 409 | `DUPLICATE_VEHICLE` | El usuario ya tiene esa patente vinculada |
+| 409 | `VEHICLE_LIMIT_REACHED` | El usuario ya tiene `VEHICLE_MAX_PER_USER` vehículos |
+| 500 | `INTERNAL_ERROR` | Error no previsto |
+| 503 | `DEPENDENCY_UNAVAILABLE` | Base caída o en timeout; lleva el header `Retry-After` |
+
+Un duplicado se informa como `DUPLICATE_VEHICLE` aunque el usuario esté en el tope.
+
+### Reglas
+
+- **Tope y concurrencia:** el conteo y el alta van en la misma transacción, bajo un advisory lock
+  por `owner_id` (`pg_advisory_xact_lock`), así que dos altas simultáneas no superan el tope. El
+  lock de titular se toma antes que el de patente, y nadie los toma al revés.
+- **Alta:** guarda el Blind Index y la patente cifrada con AES, y reclama las alertas pendientes de
+  la patente (ver "Patentes pendientes de entrega"). Si el alta se rechaza (tope o duplicado), la
+  reserva pendiente queda intacta.
+- **Desvinculación:** `unlink` busca por Blind Index entre los vehículos del usuario de la sesión.
+  Ambas formas borran el vínculo y liberan el lugar de inmediato, no emiten eventos y no tocan las
+  patentes pendientes. Las alertas ya recibidas siguen en el buzón; las nuevas dejan de llegarle
+  porque `resolve-owner` ya no lo encuentra. `DELETE /api/v1/vehicles` es la salida para quien
+  vinculó una patente mal escrita y no la recuerda.
+- **Otros titulares:** que otro usuario tenga la misma patente vinculada no cambia: cada uno tiene
+  su fila, y si uno desvincula, el otro la conserva.
 
 `POST /api/v1/vehicles/check` se eliminó en US-08: era un oráculo público de existencia de
 patentes. Responde 404.
@@ -32,18 +83,15 @@ patentes. Responde 404.
 
 El servicio sigue Clean Architecture: el paquete `internal/domain` no depende de frameworks
 HTTP, ORM ni de librerías de criptografía. Las dependencias externas (Gin, GORM, HPKE) se
-integran únicamente en las capas de infraestructura (`repository`, `delivery`, `client`,
-`crypto`).
+integran únicamente en las capas de infraestructura (`repository`, `delivery`, `crypto`).
 
 ```
 /cmd/api                    Punto de entrada del binario
 /internal/domain            Entidades e interfaces del dominio
-/internal/service/vehicle   Caso de uso de vinculación de vehículo
+/internal/service/vehicle   Casos de uso: vincular, contar y desvincular
 /internal/service/sweeper   Borrado periódico de patentes pendientes vencidas
 /internal/repository/postgres  Persistencia (GORM/PostgreSQL)
 /internal/delivery/http     Handlers HTTP (Gin)
-/internal/client/identity   Cliente hacia el servicio Identity
-/internal/client/dnrpa      Adaptador (mock) de consulta al registro automotor
 /internal/crypto/hpke       Cifrado y desencriptación HPKE
 /internal/crypto/symmetric  Cifrado AES-256-GCM at-rest
 /internal/crypto/blindindex Cálculo del Blind Index (HMAC-SHA256)
@@ -55,6 +103,15 @@ integran únicamente en las capas de infraestructura (`repository`, `delivery`, 
 ## Configuración
 
 Ver [.env.example](.env.example) para el detalle de las variables de entorno requeridas.
+
+| Variable | Descripción |
+|---|---|
+| `VEHICLE_MAX_PER_USER` | Vehículos que puede tener vinculados un usuario (US-14). Entero mayor o igual a 1. Por defecto 3 |
+
+US-14 eliminó `MOCK_DNRPA_OWNER_DNI`, `IDENTITY_INTERNAL_URL`, `IDENTITY_TIMEOUT_MS`,
+`IDENTITY_CB_*` e `IDENTITY_HPKE_PUBLIC_KEY`, junto con el puerto DNRPA, su mock y el cliente de
+Identity. `/health/deps` ya no reporta a Identity. `INTERNAL_SERVICE_TOKEN` se queda: protege el
+router interno de `resolve-owner`.
 
 ## Endpoint interno: resolución del dueño
 
@@ -139,8 +196,7 @@ La tabla nunca guarda la patente en claro, ni identificadores de alertas ni de e
   `resolve-owner` simultáneos a la misma patente comparten un único `pending_ref`.
 - **Vinculación:** al crear el vehículo, en la misma transacción y bajo el mismo lock, se borra la
   reserva de la patente. Si estaba vigente se encola `vehicle.pending.claimed` en el outbox; si había
-  vencido, se borra sin evento. Si el vehículo no se llega a crear (por ejemplo, vinculación duplicada)
-  la transacción se revierte y la reserva queda intacta. Como el `DELETE` toma el lock de la fila, dos
+  vencido, se borra sin evento. Si el vehículo no se llega a crear, la transacción se revierte y la reserva queda intacta (por ejemplo, vinculación duplicada o tope alcanzado). Como el `DELETE` toma el lock de la fila, dos
   vinculaciones simultáneas de la misma patente generan un único evento.
 - **Vencimiento:** un sweeper borra las filas vencidas cada `SWEEPER_INTERVAL_MS`.
 

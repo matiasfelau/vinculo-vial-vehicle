@@ -13,70 +13,145 @@ import (
 	"github.com/matiasfelau/vinculo-vial-vehicle/internal/service/vehicle"
 )
 
-// registerVehicleUseCase es el contrato que el handler necesita del caso de uso,
-// para poder probarlo con un doble sin depender de sus implementaciones concretas.
-type registerVehicleUseCase interface {
-	Register(ctx context.Context, input vehicle.RegisterVehicleInput) error
+// Códigos de error estables del contrato público (US-14). La app mapea por code,
+// no por status.
+const (
+	codeInvalidPlate          = "INVALID_PLATE"
+	codeVehicleNotFound       = "VEHICLE_NOT_FOUND"
+	codeDuplicateVehicle      = "DUPLICATE_VEHICLE"
+	codeVehicleLimitReached   = "VEHICLE_LIMIT_REACHED"
+	codeDependencyUnavailable = "DEPENDENCY_UNAVAILABLE"
+	codeUnauthorized          = "UNAUTHORIZED"
+	codeInternal              = "INTERNAL_ERROR"
+)
+
+// retryAfterSeconds es el valor del header Retry-After de los 503: cuánto espera
+// el cliente antes de reintentar cuando la base está caída o en timeout.
+const retryAfterSeconds = "5"
+
+// vehicleUseCase es el contrato que los handlers necesitan del caso de uso, para
+// poder probarlos con un doble sin depender de su implementación concreta.
+type vehicleUseCase interface {
+	Register(ctx context.Context, input vehicle.PlateInput) (vehicle.Summary, error)
+	Unlink(ctx context.Context, input vehicle.PlateInput) (vehicle.Summary, error)
+	UnlinkAll(ctx context.Context, ownerID uuid.UUID) error
+	Count(ctx context.Context, ownerID uuid.UUID) (vehicle.Summary, error)
 }
 
-type registerVehicleRequest struct {
+type plateRequest struct {
 	PayloadEnc string `json:"payload_enc" binding:"required"`
 }
 
-// RegisterVehicleHandler expone POST /api/v1/vehicles. Lee X-User-Id (inyectado por
-// Kong) como owner_id; nunca confía en un X-User-Id que no provenga del gateway.
-func RegisterVehicleHandler(useCase registerVehicleUseCase) gin.HandlerFunc {
+// writeError responde con el formato {error, code} del contrato.
+func writeError(c *gin.Context, status int, code, message string) {
+	c.JSON(status, gin.H{"error": message, "code": code})
+}
+
+// ownerFromHeader lee X-User-Id (inyectado por Kong) como owner_id; nunca confía
+// en un X-User-Id que no provenga del gateway. Si falta o es inválido responde 401
+// y retorna false.
+func ownerFromHeader(c *gin.Context, route string) (uuid.UUID, bool) {
+	rawUserID := c.GetHeader("X-User-Id")
+	ownerID, err := uuid.Parse(rawUserID)
+	if err != nil {
+		log.Printf("%s: X-User-Id ausente o inválido (%q): %v", route, rawUserID, err)
+		writeError(c, http.StatusUnauthorized, codeUnauthorized, "encabezado X-User-Id ausente o inválido")
+		return uuid.Nil, false
+	}
+	return ownerID, true
+}
+
+// plateHandler arma el handler de las dos rutas que reciben payload_enc: vincular
+// y desvincular. Solo cambian el caso de uso invocado y el status de éxito.
+func plateHandler(route string, status int, run func(ctx context.Context, input vehicle.PlateInput) (vehicle.Summary, error)) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		rawUserID := c.GetHeader("X-User-Id")
-		ownerID, err := uuid.Parse(rawUserID)
-		if err != nil {
-			log.Printf("POST /api/v1/vehicles: X-User-Id ausente o inválido (%q): %v", rawUserID, err)
-			c.JSON(http.StatusUnauthorized, gin.H{"error": "encabezado X-User-Id ausente o inválido"})
+		ownerID, ok := ownerFromHeader(c, route)
+		if !ok {
 			return
 		}
 
-		var req registerVehicleRequest
+		var req plateRequest
 		if err := c.ShouldBindJSON(&req); err != nil {
-			log.Printf("POST /api/v1/vehicles: payload mal formado: %v", err)
-			c.JSON(http.StatusBadRequest, gin.H{"error": "payload mal formado"})
+			// El detalle del binding puede citar el cuerpo recibido: no se loguea.
+			log.Printf("%s: payload mal formado", route)
+			writeError(c, http.StatusBadRequest, codeInvalidPlate, "payload mal formado")
 			return
 		}
 
-		input := vehicle.RegisterVehicleInput{
-			OwnerID:    ownerID,
-			PayloadEnc: req.PayloadEnc,
-		}
-
-		if err := useCase.Register(c.Request.Context(), input); err != nil {
-			writeRegisterVehicleError(c, err)
+		summary, err := run(c.Request.Context(), vehicle.PlateInput{OwnerID: ownerID, PayloadEnc: req.PayloadEnc})
+		if err != nil {
+			writeVehicleError(c, route, err)
 			return
 		}
-
-		c.Status(http.StatusCreated)
+		c.JSON(status, summary)
 	}
 }
 
-func writeRegisterVehicleError(c *gin.Context, err error) {
-	log.Printf("POST /api/v1/vehicles: rechazado por el caso de uso: %v", err)
+// RegisterVehicleHandler expone POST /api/v1/vehicles: vincula la patente escrita
+// al usuario de la sesión. Responde 201 {count, max}.
+func RegisterVehicleHandler(useCase vehicleUseCase) gin.HandlerFunc {
+	return plateHandler("POST /api/v1/vehicles", http.StatusCreated, useCase.Register)
+}
+
+// UnlinkVehicleHandler expone POST /api/v1/vehicles/unlink: desvincula la patente
+// escrita de entre los vehículos del usuario. Responde 200 {count, max}.
+func UnlinkVehicleHandler(useCase vehicleUseCase) gin.HandlerFunc {
+	return plateHandler("POST /api/v1/vehicles/unlink", http.StatusOK, useCase.Unlink)
+}
+
+// CountVehiclesHandler expone GET /api/v1/vehicles: cuántos vehículos tiene el
+// usuario y el máximo. Nunca devuelve patentes.
+func CountVehiclesHandler(useCase vehicleUseCase) gin.HandlerFunc {
+	const route = "GET /api/v1/vehicles"
+	return func(c *gin.Context) {
+		ownerID, ok := ownerFromHeader(c, route)
+		if !ok {
+			return
+		}
+		summary, err := useCase.Count(c.Request.Context(), ownerID)
+		if err != nil {
+			writeVehicleError(c, route, err)
+			return
+		}
+		c.JSON(http.StatusOK, summary)
+	}
+}
+
+// UnlinkAllVehiclesHandler expone DELETE /api/v1/vehicles: desvincula todos los
+// vehículos del usuario. Responde 204.
+func UnlinkAllVehiclesHandler(useCase vehicleUseCase) gin.HandlerFunc {
+	const route = "DELETE /api/v1/vehicles"
+	return func(c *gin.Context) {
+		ownerID, ok := ownerFromHeader(c, route)
+		if !ok {
+			return
+		}
+		if err := useCase.UnlinkAll(c.Request.Context(), ownerID); err != nil {
+			writeVehicleError(c, route, err)
+			return
+		}
+		c.Status(http.StatusNoContent)
+	}
+}
+
+// writeVehicleError traduce el error del caso de uso al status y code del
+// contrato. El log lleva el error del caso de uso, que nunca contiene la patente.
+func writeVehicleError(c *gin.Context, route string, err error) {
+	log.Printf("%s: rechazado por el caso de uso: %v", route, err)
 
 	switch {
-	case errors.Is(err, domain.ErrOwnershipMismatch):
-		c.JSON(http.StatusForbidden, gin.H{"error": "el dni no corresponde al propietario de la sesión"})
-	case errors.Is(err, domain.ErrOwnershipUnavailable):
-		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "no se pudo verificar la propiedad del vehículo"})
-	case errors.Is(err, domain.ErrOwnershipCircuitOpen):
-		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "no se pudo verificar la propiedad del vehículo"})
-	case errors.Is(err, domain.ErrOwnershipUpstreamFailure):
-		c.JSON(http.StatusBadGateway, gin.H{"error": "identity respondió con un error al verificar la propiedad"})
-	case errors.Is(err, domain.ErrOwnerLookupUnavailable):
-		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "no se pudo consultar la titularidad del vehículo"})
 	case errors.Is(err, domain.ErrRepositoryUnavailable):
-		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "no se pudo consultar la base de datos"})
+		c.Header("Retry-After", retryAfterSeconds)
+		writeError(c, http.StatusServiceUnavailable, codeDependencyUnavailable, "no se pudo consultar la base de datos")
 	case errors.Is(err, domain.ErrDuplicateVehicle):
-		c.JSON(http.StatusConflict, gin.H{"error": "el vehículo ya está vinculado a este propietario"})
+		writeError(c, http.StatusConflict, codeDuplicateVehicle, "el vehículo ya está vinculado a este propietario")
+	case errors.Is(err, domain.ErrVehicleLimitReached):
+		writeError(c, http.StatusConflict, codeVehicleLimitReached, "se alcanzó el máximo de vehículos vinculados")
+	case errors.Is(err, domain.ErrVehicleNotFound):
+		writeError(c, http.StatusNotFound, codeVehicleNotFound, "el propietario no tiene vinculada esa patente")
 	case errors.Is(err, domain.ErrInvalidPlate), errors.Is(err, domain.ErrInvalidCryptogram):
-		c.JSON(http.StatusBadRequest, gin.H{"error": "criptograma o formato de patente inválido"})
+		writeError(c, http.StatusBadRequest, codeInvalidPlate, "criptograma o formato de patente inválido")
 	default:
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "error interno"})
+		writeError(c, http.StatusInternalServerError, codeInternal, "error interno")
 	}
 }

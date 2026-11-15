@@ -6,37 +6,22 @@ var (
 	// ErrDuplicateVehicle indica que el par (owner_id, pat_hashed) ya existe.
 	ErrDuplicateVehicle = errors.New("domain: el vehículo ya está vinculado a este propietario")
 
-	// ErrOwnershipMismatch indica que Identity confirmó que el DNI no corresponde al propietario.
-	ErrOwnershipMismatch = errors.New("domain: el dni no corresponde al propietario de la sesión")
+	// ErrVehicleLimitReached indica que el propietario ya tiene el máximo de
+	// vehículos vinculados (VEHICLE_MAX_PER_USER).
+	ErrVehicleLimitReached = errors.New("domain: el propietario alcanzó el máximo de vehículos vinculados")
 
-	// ErrOwnershipUnavailable indica que Identity es inalcanzable: timeout o error de
-	// conexión. El destino nunca respondió, así que se mapea a 503 y cuenta como falla
-	// para el circuit breaker de esa dependencia.
-	ErrOwnershipUnavailable = errors.New("domain: no se pudo verificar la propiedad del vehículo")
-
-	// ErrOwnershipUpstreamFailure indica que Identity respondió, pero con un error de
-	// servidor (5xx) o un cuerpo que no pudo interpretarse. A diferencia de
-	// ErrOwnershipUnavailable, el destino sí fue alcanzado; se mapea a 502 y también
-	// cuenta como falla para el circuit breaker.
-	ErrOwnershipUpstreamFailure = errors.New("domain: identity respondió con un error de servidor")
+	// ErrVehicleNotFound indica que el propietario no tiene vinculada la patente
+	// que se quiso desvincular. Que otro titular la tenga vinculada no cuenta.
+	ErrVehicleNotFound = errors.New("domain: el propietario no tiene vinculada esa patente")
 
 	// ErrRepositoryUnavailable indica que la base de datos propia es inalcanzable o que
 	// una consulta excedió su plazo (context.DeadlineExceeded). Se mapea a 503: es una
 	// indisponibilidad de infraestructura, no un defecto del servicio.
 	ErrRepositoryUnavailable = errors.New("domain: no se pudo consultar la base de datos")
 
-	// ErrOwnershipCircuitOpen indica que el circuit breaker hacia identity está
-	// abierto: la llamada falla de inmediato sin alcanzar al destino. Se mapea a 503,
-	// igual que ErrOwnershipUnavailable, pero se distingue de esta para que un log o
-	// una métrica puedan diferenciar el fail-fast del propio breaker de un timeout real.
-	ErrOwnershipCircuitOpen = errors.New("domain: el circuito hacia identity está abierto")
-
 	// ErrInvalidPlate indica que la patente desencriptada no cumple el formato argentino esperado.
 	ErrInvalidPlate = errors.New("domain: formato de patente inválido")
 
 	// ErrInvalidCryptogram indica que payload_enc no pudo desencriptarse o no tiene el formato esperado.
 	ErrInvalidCryptogram = errors.New("domain: criptograma de patente inválido")
-
-	// ErrOwnerLookupUnavailable indica que no pudo consultarse la titularidad contra el DNRPA.
-	ErrOwnerLookupUnavailable = errors.New("domain: no se pudo consultar la titularidad del vehículo")
 )
