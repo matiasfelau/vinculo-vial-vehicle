@@ -303,6 +303,32 @@ CGO_ENABLED=0 go build -o vehicle ./cmd/api
 docker compose up --build
 ```
 
+## Cobertura
+
+La cobertura total se mide con todas las pruebas (unitarias e integración) unidas en un
+único reporte, con `-coverpkg=./...` para atribuir cada línea al paquete que la define:
+
+```
+go test ./... -covermode=atomic -coverpkg=./... -coverprofile=coverage-unit.out
+go test ./... -tags=integration -covermode=atomic -coverpkg=./... -coverprofile=coverage-integration.out
+# unir los dos perfiles (gocovmerge) y: go tool cover -func=coverage.out
+```
+
+- **Meta:** 85 % o más sobre el total del repo. El resultado vigente es 93,3 % (92,9 % solo con
+  las pruebas unitarias), medido en Linux como el CI.
+- **Sin exclusiones:** no se excluye código escrito a mano. No hay código generado.
+- **`cmd/api`:** `main` solo carga la configuración, arma el contexto de señales y llama a
+  `run(ctx, cfg)`, que construye las dependencias, levanta los servidores y los procesos de
+  fondo y los apaga cuando el contexto se cancela. `run_test.go` lo prueba levantando el
+  servicio real con configuración de prueba y apagándolo; la de `main` envía SIGTERM al propio
+  proceso y se omite en Windows. Esas pruebas crean una base
+  PostgreSQL propia a partir de `DATABASE_URL` (necesita permiso para `CREATE DATABASE`) y se
+  omiten sin esa variable; la de RabbitMQ se omite sin `TEST_RABBITMQ_URL`.
+- **Las pruebas con PostgreSQL comparten la base de `DATABASE_URL`:** correr los paquetes en
+  paralelo (el default de `go test ./...`) puede producir fallas intermitentes entre
+  `internal/repository/postgres`, `internal/delivery/events` y `cmd/api`. Para una medición
+  estable usá `go test -p 1 ./...`.
+
 ## Nomenclatura de infraestructura Docker
 
 `docker-compose.yml` fija explícitamente los nombres de contenedor, red y volumen para
