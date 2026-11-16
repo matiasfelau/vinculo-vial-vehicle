@@ -6,6 +6,18 @@ on:
   pull_request:
     branches: [main, dev]
 
+permissions:
+  contents: read
+
+env:
+  # Versiones de las herramientas de CI, fijadas para que el resultado sea reproducible.
+  GOCOVMERGE_VERSION: b5bfa59ec0ad # github.com/wadey/gocovmerge (sin releases; commit de 2016-03-31)
+  GOCOVER_COBERTURA_VERSION: v1.5.0
+  GOVULNCHECK_VERSION: v1.9.0
+  DIFF_COVER_VERSION: 11.0.1
+  SEMGREP_VERSION: 1.184.0
+  COVERAGE_THRESHOLD: "85"
+
 jobs:
   build-and-test:
     runs-on: ubuntu-latest
@@ -23,14 +35,27 @@ jobs:
           --health-interval 5s
           --health-timeout 5s
           --health-retries 10
+      rabbitmq:
+        image: rabbitmq:3.13-alpine
+        ports:
+          - 5672:5672
+        options: >-
+          --health-cmd "rabbitmq-diagnostics -q ping"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
     env:
       DATABASE_URL: postgres://vehicle:vehicle@localhost:5432/vehicle?sslmode=disable
+      TEST_RABBITMQ_URL: amqp://guest:guest@localhost:5672/
     steps:
       - name: Descargar código fuente
-        uses: actions/checkout@v4
+        # fetch-depth 0: diff-cover necesita el historial para comparar contra la rama base del PR.
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          fetch-depth: 0
 
       - name: Configurar Go
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
         with:
           go-version: "1.26"
 
@@ -40,8 +65,115 @@ jobs:
       - name: Compilar
         run: CGO_ENABLED=0 go build -o vehicle ./cmd/api
 
-      - name: Ejecutar pruebas
-        run: go test ./... -v
-
       - name: Vet
         run: go vet ./...
+
+      - name: Pruebas unitarias con cobertura
+        run: go test ./... -v -covermode=atomic -coverpkg=./... -coverprofile=coverage-unit.out
+
+      - name: Pruebas de integración con cobertura
+        run: go test ./... -v -tags=integration -covermode=atomic -coverpkg=./... -coverprofile=coverage-integration.out
+
+      - name: Unir perfiles y convertir a Cobertura XML
+        run: |
+          go install "github.com/wadey/gocovmerge@${GOCOVMERGE_VERSION}"
+          go install "github.com/boumenot/gocover-cobertura@${GOCOVER_COBERTURA_VERSION}"
+          gocovmerge coverage-unit.out coverage-integration.out > coverage.out
+          gocover-cobertura < coverage.out > coverage.xml
+
+      - name: Publicar cobertura total
+        run: |
+          total="$(go tool cover -func=coverage.out | awk '/^total:/ {print $3}')"
+          {
+            echo "## Cobertura total"
+            echo
+            echo "**${total}** de las sentencias (pruebas unitarias e integración unidas). Informativo: no corta el job."
+          } >> "$GITHUB_STEP_SUMMARY"
+          go tool cover -func=coverage.out > coverage-func.txt
+
+      - name: Subir reportes de cobertura
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: cobertura
+          path: |
+            coverage.out
+            coverage.xml
+            coverage-func.txt
+          if-no-files-found: ignore
+
+      - name: Gate de cobertura sobre el código nuevo
+        if: github.event_name == 'pull_request'
+        env:
+          BASE_REF: ${{ github.base_ref }}
+        run: |
+          python -m pip install --quiet "diff-cover==${DIFF_COVER_VERSION}"
+          git fetch --no-tags origin "$BASE_REF"
+          status=0
+          diff-cover coverage.xml --compare-branch="origin/$BASE_REF" --fail-under="${COVERAGE_THRESHOLD}" \
+            --format "markdown:diff-cover.md" || status=$?
+          {
+            echo "## Cobertura del código nuevo (mínimo ${COVERAGE_THRESHOLD} %)"
+            echo
+            cat diff-cover.md
+          } >> "$GITHUB_STEP_SUMMARY"
+          exit "$status"
+
+  security:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Descargar código fuente
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+
+      - name: Configurar Go
+        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
+        with:
+          go-version: "1.26"
+
+      - name: govulncheck
+        run: |
+          go install "golang.org/x/vuln/cmd/govulncheck@${GOVULNCHECK_VERSION}"
+          govulncheck ./...
+
+      - name: Trivy (vulnerabilidades, secretos y configuración)
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          scan-type: fs
+          scan-ref: .
+          scanners: vuln,secret,misconfig
+          severity: HIGH,CRITICAL
+          ignore-unfixed: true
+          exit-code: "1"
+          trivyignores: .trivyignore
+
+      # Informativo: pasa a gate en v0.14.
+      - name: Semgrep
+        continue-on-error: true
+        run: |
+          python -m pip install --quiet "semgrep==${SEMGREP_VERSION}"
+          semgrep scan --config p/default --metrics=off --quiet --json --output semgrep.json || true
+          python - <<'EOF'
+          import json, os
+          with open("semgrep.json", encoding="utf-8") as f:
+              data = json.load(f)
+          findings = data.get("results", [])
+          lines = ["## Semgrep (informativo)", ""]
+          if not findings:
+              lines.append("Sin hallazgos.")
+          else:
+              lines += [f"{len(findings)} hallazgo(s).", "", "| Severidad | Regla | Ubicación |", "|---|---|---|"]
+              for r in findings:
+                  sev = r.get("extra", {}).get("severity", "")
+                  loc = f'{r["path"]}:{r["start"]["line"]}'
+                  lines.append(f'| {sev} | `{r["check_id"]}` | `{loc}` |')
+          with open(os.environ["GITHUB_STEP_SUMMARY"], "a", encoding="utf-8") as out:
+              out.write("\n".join(lines) + "\n")
+          EOF
+
+      - name: Subir resultado de Semgrep
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: semgrep
+          path: semgrep.json
+          if-no-files-found: ignore

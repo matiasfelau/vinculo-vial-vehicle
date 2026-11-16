@@ -11,6 +11,8 @@
 # Instrucciones locales del agente (no versionadas)
 CLAUDE.md
 .clauderules
+clauderules
+CONTRATO-*.md
 
 # IDE
 .vscode/
