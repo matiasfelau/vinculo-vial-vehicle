@@ -6,6 +6,7 @@ import (
 	"net"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgconn"
 	"gorm.io/gorm"
 
@@ -89,14 +90,38 @@ func NewVehicleRepository(db *gorm.DB, opts ...Option) *VehicleRepository {
 	return r
 }
 
-// Create persiste el vehículo. Ante la violación de UNIQUE(owner_id, pat_hashed)
-// retorna domain.ErrDuplicateVehicle.
+// lockOwnerSQL toma un advisory lock transaccional sobre el titular. Serializa
+// las altas de un mismo titular: sin él, dos altas simultáneas leerían el mismo
+// conteo y ambas pasarían el tope. La semilla distinta de la del lock de patente
+// evita que un id de titular y un blind index colisionen en el mismo lock.
+const lockOwnerSQL = "SELECT pg_advisory_xact_lock(hashtextextended(?, 1))"
+
+// lockOwner toma el advisory lock del titular hasta el fin de la transacción.
+// Orden de locks: primero el del titular y después el de la patente. Nadie toma
+// el de la patente y luego el del titular, así que no hay interbloqueo.
+func lockOwner(tx *gorm.DB, ownerID uuid.UUID) error {
+	return tx.Exec(lockOwnerSQL, ownerID.String()).Error
+}
+
+// countOwned cuenta los vehículos vinculados al titular dentro de tx.
+func countOwned(tx *gorm.DB, ownerID uuid.UUID) (int, error) {
+	var total int64
+	err := tx.Model(&vehicleModel{}).Where("owner_id = ?", ownerID).Count(&total).Error
+	return int(total), err
+}
+
+// Create vincula el vehículo y retorna cuántos vehículos tiene el titular después
+// del alta. Todo ocurre en una transacción bajo el lock del titular: se rechaza
+// el duplicado (ErrDuplicateVehicle, aunque el titular esté en el tope), se
+// rechaza el alta si ya tiene maxPerOwner (ErrVehicleLimitReached) y recién
+// entonces se inserta. La restricción UNIQUE(owner_id, pat_hashed) queda como
+// red de seguridad y también se traduce a ErrDuplicateVehicle.
 //
 // Si la patente tenía una reserva pendiente vigente (US-10), es decir, este es el
 // primer dueño de una patente con alertas esperando, la misma transacción borra
 // la reserva y encola vehicle.pending.claimed en el outbox: el vehículo, el
 // borrado y el evento se confirman juntos o ninguno.
-func (r *VehicleRepository) Create(ctx context.Context, vehicle *domain.Vehicle) error {
+func (r *VehicleRepository) Create(ctx context.Context, vehicle *domain.Vehicle, maxPerOwner int) (int, error) {
 	ctx, cancel := context.WithTimeout(ctx, r.queryTimeout)
 	defer cancel()
 
@@ -108,24 +133,87 @@ func (r *VehicleRepository) Create(ctx context.Context, vehicle *domain.Vehicle)
 		CreatedAt: vehicle.CreatedAt,
 	}
 
+	var total int
 	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := lockOwner(tx, vehicle.OwnerID); err != nil {
+			return err
+		}
+
+		var already int64
+		if err := tx.Model(&vehicleModel{}).
+			Where("owner_id = ? AND pat_hashed = ?", vehicle.OwnerID, vehicle.PatHashed).
+			Count(&already).Error; err != nil {
+			return err
+		}
+		if already > 0 {
+			return domain.ErrDuplicateVehicle
+		}
+
+		owned, err := countOwned(tx, vehicle.OwnerID)
+		if err != nil {
+			return err
+		}
+		if owned >= maxPerOwner {
+			return domain.ErrVehicleLimitReached
+		}
+
 		if err := lockPlate(tx, vehicle.PatHashed); err != nil {
 			return err
 		}
 		if err := tx.Create(&model).Error; err != nil {
 			return err
 		}
+		total = owned + 1
 		return claimPending(tx, vehicle)
 	})
 	if err != nil {
 		var pgErr *pgconn.PgError
 		if errors.As(err, &pgErr) && pgErr.Code == uniqueViolationCode {
-			return domain.ErrDuplicateVehicle
+			return 0, domain.ErrDuplicateVehicle
 		}
-		return classifyError(err)
+		return 0, classifyError(err)
 	}
 
-	return nil
+	return total, nil
+}
+
+// CountByOwner retorna cuántos vehículos tiene vinculados el titular.
+func (r *VehicleRepository) CountByOwner(ctx context.Context, ownerID uuid.UUID) (int, error) {
+	ctx, cancel := context.WithTimeout(ctx, r.queryTimeout)
+	defer cancel()
+
+	total, err := countOwned(r.db.WithContext(ctx), ownerID)
+	if err != nil {
+		return 0, classifyError(err)
+	}
+	return total, nil
+}
+
+// DeleteByOwnerAndPlate desvincula la patente del titular y retorna cuántos
+// vehículos le quedan. Solo toca la fila del titular: otro titular que vinculó la
+// misma patente tiene su propia fila y la conserva. No toca pending_plates ni
+// emite eventos. Si el titular no la tenía vinculada retorna ErrVehicleNotFound.
+func (r *VehicleRepository) DeleteByOwnerAndPlate(ctx context.Context, ownerID uuid.UUID, patHashed string) (int, error) {
+	ctx, cancel := context.WithTimeout(ctx, r.queryTimeout)
+	defer cancel()
+
+	var remaining int
+	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		result := tx.Where("owner_id = ? AND pat_hashed = ?", ownerID, patHashed).Delete(&vehicleModel{})
+		if result.Error != nil {
+			return result.Error
+		}
+		if result.RowsAffected == 0 {
+			return domain.ErrVehicleNotFound
+		}
+		var err error
+		remaining, err = countOwned(tx, ownerID)
+		return err
+	})
+	if err != nil {
+		return 0, classifyError(err)
+	}
+	return remaining, nil
 }
 
 // Ping verifica la conectividad con la base de datos.

@@ -19,3 +19,7 @@ CLAUDE.md
 # Sistema operativo
 .DS_Store
 Thumbs.db
+
+# Contratos y archivos de instrucciones de las tareas (no versionados)
+CONTRATO-*.md
+clauderules

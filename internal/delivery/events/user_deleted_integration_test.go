@@ -383,7 +383,7 @@ func TestIntegracionUserDeletedBorraSusVehiculosEnPostgres(t *testing.T) {
 		owner uuid.UUID
 		plate string
 	}{{baja, compartida}, {baja, uuid.NewString()}, {otro, compartida}, {otro, uuid.NewString()}} {
-		err := repo.Create(context.Background(), &domain.Vehicle{ID: uuid.New(), OwnerID: v.owner, PatHashed: v.plate, PatAES: "cifrado", CreatedAt: time.Now()})
+		_, err := repo.Create(context.Background(), &domain.Vehicle{ID: uuid.New(), OwnerID: v.owner, PatHashed: v.plate, PatAES: "cifrado", CreatedAt: time.Now()}, 3)
 		if err != nil {
 			t.Fatalf("no se pudo crear el vehículo: %v", err)
 		}
