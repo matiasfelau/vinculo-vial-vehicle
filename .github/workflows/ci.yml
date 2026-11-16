@@ -81,15 +81,17 @@ jobs:
           gocovmerge coverage-unit.out coverage-integration.out > coverage.out
           gocover-cobertura < coverage.out > coverage.xml
 
-      - name: Publicar cobertura total
+      # Segundo gate, sobre el total del repo: ninguna rama puede bajarlo de 85 %.
+      - name: Publicar cobertura total y exigir el mínimo
         run: |
           total="$(go tool cover -func=coverage.out | awk '/^total:/ {print $3}')"
           {
             echo "## Cobertura total"
             echo
-            echo "**${total}** de las sentencias (pruebas unitarias e integración unidas). Informativo: no corta el job."
+            echo "**${total}** de las sentencias (pruebas unitarias e integración unidas). Mínimo: 85 %."
           } >> "$GITHUB_STEP_SUMMARY"
           go tool cover -func=coverage.out > coverage-func.txt
+          awk -v t="${total%\%}" 'BEGIN { exit (t >= 85) ? 0 : 1 }'
 
       - name: Subir reportes de cobertura
         if: always()
