@@ -314,8 +314,9 @@ go test ./... -tags=integration -covermode=atomic -coverpkg=./... -coverprofile=
 # unir los dos perfiles (gocovmerge) y: go tool cover -func=coverage.out
 ```
 
-- **Meta:** 85 % o más sobre el total del repo. El resultado vigente es 93,3 % (92,9 % solo con
-  las pruebas unitarias), medido en Linux como el CI.
+- **Meta:** 85 % o más sobre el total del repo. El resultado vigente es 92,9 % (87,1 % solo con
+  las pruebas unitarias, con `DATABASE_URL` y `TEST_RABBITMQ_URL` definidas), y es el mínimo que exige el gate del CI.
+  `cmd/api` cuenta: `main` solo llama a `run(ctx, cfg)`, que se prueba levantando y apagando el servicio.
 - **Sin exclusiones:** no se excluye código escrito a mano. No hay código generado.
 - **`cmd/api`:** `main` solo carga la configuración, arma el contexto de señales y llama a
   `run(ctx, cfg)`, que construye las dependencias, levanta los servidores y los procesos de
@@ -354,7 +355,7 @@ compartida.
 `.github/workflows/ci.yml` corre en todo `pull_request` hacia `dev` o `main` (y en los push a esas ramas). Tiene dos jobs:
 
 - **`build-and-test`**: compila, `go vet`, y corre las pruebas con cobertura contra un PostgreSQL y un RabbitMQ reales (servicios del job). Une el perfil de las pruebas unitarias con el de `-tags=integration` en un único reporte (`gocovmerge`) y lo convierte a Cobertura XML (`gocover-cobertura`).
-  - **Cobertura total**: va a `$GITHUB_STEP_SUMMARY` y al artefacto `cobertura`. No corta el job. Cuando todos los repos lleguen al 85 % (v0.14), el gate pasa a ser sobre el total.
+  - **Gate sobre el total**: va a `$GITHUB_STEP_SUMMARY` y al artefacto `cobertura`, y el job falla si baja de 85 %. Ninguna rama puede bajar el total de ese mínimo.
   - **Gate sobre el código nuevo**: `diff-cover` exige al menos 85 % de cobertura en las líneas que el PR cambia respecto de la rama base del PR (`github.base_ref`, pasada por variable de entorno `BASE_REF`). Por eso el checkout usa `fetch-depth: 0`.
 - **`security`**: `govulncheck` (falla ante vulnerabilidades alcanzables), Trivy `fs` (HIGH y CRITICAL con corrección disponible, secretos y configuración) y Semgrep. Semgrep es solo informativo por ahora: deja el resultado en el resumen y en el artefacto `semgrep`, y pasa a gate en v0.14.
 
