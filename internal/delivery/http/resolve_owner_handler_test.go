@@ -24,14 +24,29 @@ type fakeResolveOwnersUseCase struct {
 	patEncAudit     string
 	auditKeyID      string
 	pendingRef      *uuid.UUID
+	dedupKey        string
 	err             error
 	receivedPatEnc  string
 	receivedAlertID uuid.UUID
+	receivedIssuer  string
 	fueInvocado     bool
+
+	dedupKeyErr      error
+	dedupKeyInvocado bool
+	dedupKeyPatEnc   string
+	dedupKeyIssuer   string
 }
 
-func (f *fakeResolveOwnersUseCase) ResolveOwners(ctx context.Context, patEnc string, alertID uuid.UUID) (domain.OwnerResolution, error) {
+func (f *fakeResolveOwnersUseCase) DedupKey(patEnc, issuerID string) (string, error) {
+	f.dedupKeyInvocado = true
+	f.dedupKeyPatEnc = patEnc
+	f.dedupKeyIssuer = issuerID
+	return f.dedupKey, f.dedupKeyErr
+}
+
+func (f *fakeResolveOwnersUseCase) ResolveOwners(ctx context.Context, patEnc string, alertID uuid.UUID, issuerID string) (domain.OwnerResolution, error) {
 	f.fueInvocado = true
+	f.receivedIssuer = issuerID
 	f.receivedPatEnc = patEnc
 	f.receivedAlertID = alertID
 	return domain.OwnerResolution{
@@ -40,6 +55,7 @@ func (f *fakeResolveOwnersUseCase) ResolveOwners(ctx context.Context, patEnc str
 		PatEncAudit: f.patEncAudit,
 		AuditKeyID:  f.auditKeyID,
 		PendingRef:  f.pendingRef,
+		DedupKey:    f.dedupKey,
 	}, f.err
 }
 
@@ -323,5 +339,52 @@ func TestResolveOwnerErrorInternoRetorna500(t *testing.T) {
 
 	if rec.Code != http.StatusInternalServerError {
 		t.Fatalf("esperaba 500, obtuvo %d", rec.Code)
+	}
+}
+
+func TestResolveOwnerConIssuerIDDevuelveDedupKeyYSeLaPasaAlCasoDeUso(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	resolver := &fakeResolveOwnersUseCase{patEncIA: "cifrado-para-ia", dedupKey: "ab12"}
+	router := NewInternalRouter(secretoDePrueba, resolver)
+	body := validBody()
+	body["issuer_id"] = "emisor-1"
+
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, resolveOwnerRequestBody(t, body))
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("esperaba 200, obtuvo %d (%s)", rec.Code, rec.Body.String())
+	}
+	var res resolveOwnerResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &res); err != nil {
+		t.Fatalf("la respuesta no es JSON: %v", err)
+	}
+	if res.DedupKey != "ab12" {
+		t.Fatalf("esperaba dedup_key ab12, obtuvo %q", res.DedupKey)
+	}
+	if resolver.receivedIssuer != "emisor-1" {
+		t.Fatalf("el caso de uso recibió issuer_id %q", resolver.receivedIssuer)
+	}
+	if res.PatEncIA != "cifrado-para-ia" {
+		t.Fatal("la respuesta debe conservar el resto de los campos")
+	}
+}
+
+func TestResolveOwnerSinIssuerIDOmiteDedupKey(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	resolver := &fakeResolveOwnersUseCase{patEncIA: "cifrado-para-ia"}
+	router := NewInternalRouter(secretoDePrueba, resolver)
+
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, resolveOwnerRequestBody(t, validBody()))
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("esperaba 200, obtuvo %d (%s)", rec.Code, rec.Body.String())
+	}
+	if bytes.Contains(rec.Body.Bytes(), []byte("dedup_key")) {
+		t.Fatalf("sin issuer_id la respuesta queda como antes, obtuvo %s", rec.Body.String())
+	}
+	if resolver.receivedIssuer != "" {
+		t.Fatalf("el caso de uso recibió issuer_id %q sin que llegara", resolver.receivedIssuer)
 	}
 }

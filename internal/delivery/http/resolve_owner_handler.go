@@ -16,25 +16,30 @@ import (
 // uso, para poder probarlo con un doble sin depender de su implementación
 // concreta.
 type resolveOwnersUseCase interface {
-	ResolveOwners(ctx context.Context, patEnc string, alertID uuid.UUID) (domain.OwnerResolution, error)
+	ResolveOwners(ctx context.Context, patEnc string, alertID uuid.UUID, issuerID string) (domain.OwnerResolution, error)
 }
 
 type resolveOwnerRequest struct {
 	PatEnc  string `json:"pat_enc" binding:"required"`
 	AlertID string `json:"alert_id" binding:"required"`
+
+	// IssuerID (US-16) es opcional: si llega, la respuesta suma dedup_key.
+	IssuerID string `json:"issuer_id"`
 }
 
 // resolveOwnerResponse es la respuesta de /internal/resolve-owner. PatEncIA va
 // siempre, también cuando owner_ids está vacío: IA valida la patente igual.
 // PendingRef solo va cuando la patente no tiene dueños (US-10) y se omite si no.
 // PatEncAudit y AuditKeyID (US-11) también van siempre: Alert los lleva a Audit
-// por el outbox y nunca los guarda en tablas de dominio.
+// por el outbox y nunca los guarda en tablas de dominio. DedupKey (US-16) solo va
+// cuando el request trae issuer_id y se omite si no.
 type resolveOwnerResponse struct {
 	OwnerIDs    []uuid.UUID `json:"owner_ids"`
 	PatEncIA    string      `json:"pat_enc_ia"`
 	PendingRef  *uuid.UUID  `json:"pending_ref,omitempty"`
 	PatEncAudit string      `json:"pat_enc_audit"`
 	AuditKeyID  string      `json:"audit_key_id"`
+	DedupKey    string      `json:"dedup_key,omitempty"`
 }
 
 // ResolveOwnerHandler expone POST /internal/resolve-owner sobre el router
@@ -46,7 +51,8 @@ type resolveOwnerResponse struct {
 // {owner_ids: [...], pat_enc_ia: "...", pending_ref?: "...", pat_enc_audit: "...",
 // audit_key_id: "..."}, con un array vacío (nunca null) cuando la patente no está
 // en la red: es un resultado válido, no un error. pending_ref solo acompaña a un
-// owner_ids vacío.
+// owner_ids vacío. issuer_id es opcional (US-16): con él, la respuesta suma
+// dedup_key; sin él, queda como siempre.
 func ResolveOwnerHandler(useCase resolveOwnersUseCase) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		var req resolveOwnerRequest
@@ -63,7 +69,7 @@ func ResolveOwnerHandler(useCase resolveOwnersUseCase) gin.HandlerFunc {
 			return
 		}
 
-		resolution, err := useCase.ResolveOwners(c.Request.Context(), req.PatEnc, alertID)
+		resolution, err := useCase.ResolveOwners(c.Request.Context(), req.PatEnc, alertID, req.IssuerID)
 		if err != nil {
 			writeResolveOwnerError(c, err)
 			return
@@ -79,6 +85,7 @@ func ResolveOwnerHandler(useCase resolveOwnersUseCase) gin.HandlerFunc {
 			PendingRef:  resolution.PendingRef,
 			PatEncAudit: resolution.PatEncAudit,
 			AuditKeyID:  resolution.AuditKeyID,
+			DedupKey:    resolution.DedupKey,
 		})
 	}
 }

@@ -14,6 +14,12 @@ import (
 // un valor estático, provisto por configuración en ambos extremos.
 const HeaderInternalServiceToken = "X-Internal-Service-Token"
 
+// internalUseCase agrupa los casos de uso que expone el router interno.
+type internalUseCase interface {
+	resolveOwnersUseCase
+	dedupKeyUseCase
+}
+
 // NewInternalRouter construye el motor Gin de las rutas /internal/*.
 //
 // Se sirve por separado de NewRouter, en su propio *http.Server y su propio
@@ -23,7 +29,7 @@ const HeaderInternalServiceToken = "X-Internal-Service-Token"
 // cualquier contenedor alcanza cualquier puerto de otro—, así que
 // requireServiceToken exige además, en toda petición, el secreto de servicio
 // como segunda capa de la defensa en profundidad.
-func NewInternalRouter(serviceToken string, resolver resolveOwnersUseCase) *gin.Engine {
+func NewInternalRouter(serviceToken string, resolver internalUseCase) *gin.Engine {
 	engine := gin.New()
 	engine.Use(gin.Logger())
 	engine.Use(gin.Recovery())
@@ -34,6 +40,7 @@ func NewInternalRouter(serviceToken string, resolver resolveOwnersUseCase) *gin.
 		c.JSON(http.StatusOK, gin.H{"status": "ok"})
 	})
 	engine.POST("/internal/resolve-owner", ResolveOwnerHandler(resolver))
+	engine.POST("/internal/dedup-key", DedupKeyHandler(resolver))
 
 	return engine
 }

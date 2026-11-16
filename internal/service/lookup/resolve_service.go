@@ -41,6 +41,7 @@ type ResolveOwnersService struct {
 	auditEncryptor  PlateEncryptor
 	auditKeyID      string
 	hmacSecret      []byte
+	dedupSecret     []byte
 	pendingDelivery time.Duration
 	now             func() time.Time
 }
@@ -50,8 +51,9 @@ type ResolveOwnersService struct {
 // con una instancia independiente, con la de Audit (AUDIT_PUBLIC_KEY);
 // auditKeyID es AUDIT_KEY_ID. pendingDelivery es PENDING_DELIVERY_HOURS: cuánto
 // tiempo conserva Vehicle la reserva de una patente sin dueños, contado desde la
-// última alerta.
-func NewResolveOwnersService(repository domain.VehicleRepository, decryptor PlateDecryptor, encryptor, auditEncryptor PlateEncryptor, auditKeyID string, hmacSecret []byte, pendingDelivery time.Duration) *ResolveOwnersService {
+// última alerta. dedupSecret es ALERT_DEDUP_HMAC_KEY (US-16): la clave de la
+// dedup_key, independiente de hmacSecret (PAT_HMAC_SECRET).
+func NewResolveOwnersService(repository domain.VehicleRepository, decryptor PlateDecryptor, encryptor, auditEncryptor PlateEncryptor, auditKeyID string, hmacSecret, dedupSecret []byte, pendingDelivery time.Duration) *ResolveOwnersService {
 	return &ResolveOwnersService{
 		repository:      repository,
 		decryptor:       decryptor,
@@ -59,6 +61,7 @@ func NewResolveOwnersService(repository domain.VehicleRepository, decryptor Plat
 		auditEncryptor:  auditEncryptor,
 		auditKeyID:      auditKeyID,
 		hmacSecret:      hmacSecret,
+		dedupSecret:     dedupSecret,
 		pendingDelivery: pendingDelivery,
 		now:             func() time.Time { return time.Now().UTC() },
 	}
@@ -82,10 +85,14 @@ func NewResolveOwnersService(repository domain.VehicleRepository, decryptor Plat
 // extiende. Si tiene al menos un dueño (incluido el propio emisor, que Vehicle
 // no conoce) no hay reserva: la patente tiene dueño.
 //
+// Si el llamador pasa issuerID (US-16), la respuesta suma dedup_key, calculada con
+// la misma patente canónica, también con o sin dueños. Sin issuerID la respuesta
+// no la incluye.
+//
 // Un slice vacío es un resultado válido, no un error. Un error de cifrado es
 // un error interno y nunca devuelve una respuesta parcial. La patente se purga
 // de memoria en todos los caminos.
-func (s *ResolveOwnersService) ResolveOwners(ctx context.Context, patEnc string, alertID uuid.UUID) (domain.OwnerResolution, error) {
+func (s *ResolveOwnersService) ResolveOwners(ctx context.Context, patEnc string, alertID uuid.UUID, issuerID string) (domain.OwnerResolution, error) {
 	plate, err := canonicalPlate(s.decryptor, patEnc)
 	if err != nil {
 		return domain.OwnerResolution{}, err
@@ -112,11 +119,32 @@ func (s *ResolveOwnersService) ResolveOwners(ctx context.Context, patEnc string,
 		return domain.OwnerResolution{}, fmt.Errorf("lookup: no se pudo cifrar la patente hacia Audit: %w", err)
 	}
 
+	var dedupKey string
+	if issuerID != "" {
+		dedupKey = blindindex.DedupKey(s.dedupSecret, issuerID, plate)
+	}
+
 	return domain.OwnerResolution{
 		OwnerIDs:    ownerIDs,
 		PatEncIA:    base64.StdEncoding.EncodeToString(sealed),
 		PatEncAudit: base64.StdEncoding.EncodeToString(sealedAudit),
 		AuditKeyID:  s.auditKeyID,
 		PendingRef:  pendingRef,
+		DedupKey:    dedupKey,
 	}, nil
+}
+
+// DedupKey (US-16) desencripta patEnc y devuelve la clave de deduplicación del
+// par (issuerID, patente canónica): HMAC-SHA256(ALERT_DEDUP_HMAC_KEY,
+// issuer_id + ":" + patente), en hex. Es una función pura: no consulta ni escribe
+// la base, no reserva patentes pendientes y no revela si la patente tiene dueños.
+// La patente se purga de memoria en todos los caminos.
+func (s *ResolveOwnersService) DedupKey(patEnc, issuerID string) (string, error) {
+	plate, err := canonicalPlate(s.decryptor, patEnc)
+	if err != nil {
+		return "", err
+	}
+	defer secure.Wipe(plate)
+
+	return blindindex.DedupKey(s.dedupSecret, issuerID, plate), nil
 }

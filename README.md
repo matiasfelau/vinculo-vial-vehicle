@@ -107,6 +107,7 @@ Ver [.env.example](.env.example) para el detalle de las variables de entorno req
 | Variable | Descripción |
 |---|---|
 | `VEHICLE_MAX_PER_USER` | Vehículos que puede tener vinculados un usuario (US-14). Entero mayor o igual a 1. Por defecto 3 |
+| `ALERT_DEDUP_HMAC_KEY` | Clave de la `dedup_key` (US-16): 32 bytes en base64 (`openssl rand -base64 32`). Obligatoria e independiente de `PAT_HMAC_SECRET`. Sin ella, con otro largo o igual a `PAT_HMAC_SECRET`, el servicio no arranca |
 
 US-14 eliminó `MOCK_DNRPA_OWNER_DNI`, `IDENTITY_INTERNAL_URL`, `IDENTITY_TIMEOUT_MS`,
 `IDENTITY_CB_*` e `IDENTITY_HPKE_PUBLIC_KEY`, junto con el puerto DNRPA, su mock y el cliente de
@@ -119,9 +120,9 @@ router interno de `resolve-owner`.
 `vinculo-vial` y con el header `X-Internal-Service-Token`. Nunca se expone en Kong.
 
 ```
-req:  { "pat_enc": "<base64>", "alert_id": "uuid" }
+req:  { "pat_enc": "<base64>", "alert_id": "uuid", "issuer_id": "<string, opcional>" }
 res:  200 { "owner_ids": ["uuid", ...], "pat_enc_ia": "<base64>", "pending_ref": "uuid",
-            "pat_enc_audit": "<base64>", "audit_key_id": "<string>" }
+            "pat_enc_audit": "<base64>", "audit_key_id": "<string>", "dedup_key": "<hex>" }
       400 criptograma, formato de patente o alert_id inválidos · 503 base no disponible
 ```
 
@@ -131,10 +132,42 @@ res:  200 { "owner_ids": ["uuid", ...], "pat_enc_ia": "<base64>", "pending_ref":
   alerta igual.
 - `pat_enc_audit` y `audit_key_id` (US-11) también se devuelven **siempre**, con o sin
   dueños y con o sin `pending_ref`. Ver "Sellado de la patente para Audit".
+- `dedup_key` (US-16) solo se devuelve si el request trae `issuer_id`; sin él, la respuesta
+  queda como antes. Se calcula con la misma patente canónica, también con o sin dueños. Ver
+  "Clave de deduplicación por emisor".
 - `owner_ids` vacío (`[]`, nunca `null`) es un resultado válido, no un error.
 - `pending_ref` solo se devuelve cuando `owner_ids` está vacío (ver "Patentes pendientes").
 - La patente en claro se purga de memoria en todos los caminos. Ni la patente, ni
   `pat_enc`, ni `pat_enc_ia`, ni `pat_enc_audit`, ni el Blind Index se loguean.
+
+### Clave de deduplicación por emisor (US-16)
+
+Alert limita a una alerta por emisor y patente cada 24 h, pero nunca ve la patente. Vehicle le
+da una clave que permite contar las alertas de un emisor a una patente sin revelarla:
+
+```
+dedup_key = HMAC-SHA256(ALERT_DEDUP_HMAC_KEY, issuer_id + ":" + patente normalizada)   # hex, 64 caracteres
+```
+
+Dos entradas, con el mismo resultado para el mismo emisor y patente:
+
+| Ruta | Request | Respuesta |
+|---|---|---|
+| `POST /internal/dedup-key` | `{ "pat_enc": "<base64>", "issuer_id": "<string>" }` | `200 { "dedup_key" }` · `400 INVALID_PLATE` (criptograma o formato inválido) |
+| `POST /internal/resolve-owner` | suma `issuer_id` opcional | suma `dedup_key` si el request trae `issuer_id` |
+
+- **Misma protección que el resto de `/internal`:** puerto interno y `X-Internal-Service-Token`.
+- **Sin efectos:** `dedup-key` solo descifra y calcula. No consulta la base, no reserva patentes
+  pendientes y responde igual con o sin dueños: no revela si la patente está en la red.
+- **Normalización:** la patente se normaliza y valida como en el resto del servicio antes de
+  entrar al HMAC, así `ab 123 cd` y `AB123CD` dan la misma clave.
+- **Qué permite y qué no:** Alert cuenta las alertas de un emisor a una patente, pero no puede
+  relacionar alertas de emisores distintos a la misma patente ni buscar el vehículo, porque la
+  clave es distinta de la del Blind Index (`PAT_HMAC_SECRET`).
+- **Rotación:** cambiar `ALERT_DEDUP_HMAC_KEY` hace que las alertas ya guardadas con la clave
+  vieja dejen de contar para el cupo.
+- **Privacidad:** ni la patente, ni `pat_enc`, ni la `dedup_key` se loguean; la patente se
+  purga de memoria en todos los caminos.
 
 ### Sellado de la patente para Audit (US-11)
 

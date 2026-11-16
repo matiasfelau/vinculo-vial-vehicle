@@ -6,6 +6,9 @@ import (
 	"time"
 )
 
+// claveDedupValida son 32 bytes (0x01 repetido) en base64.
+const claveDedupValida = "AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE="
+
 func setEnvCompleto(t *testing.T) {
 	t.Helper()
 
@@ -14,6 +17,7 @@ func setEnvCompleto(t *testing.T) {
 		"VEHICLE_HPKE_PRIVATE_KEY": "clave-de-prueba",
 		"PAT_AES_KEY":              "clave-de-prueba",
 		"PAT_HMAC_SECRET":          "clave-de-prueba",
+		"ALERT_DEDUP_HMAC_KEY":     claveDedupValida,
 		"IA_HPKE_PUBLIC_KEY":       "clave-de-prueba-ia",
 		"AUDIT_PUBLIC_KEY":         "clave-de-prueba-audit",
 		"AUDIT_KEY_ID":             "2026-11",
@@ -192,6 +196,7 @@ func TestLoadFallaSinVariablesObligatorias(t *testing.T) {
 		"VEHICLE_HPKE_PRIVATE_KEY",
 		"PAT_AES_KEY",
 		"PAT_HMAC_SECRET",
+		"ALERT_DEDUP_HMAC_KEY",
 		"IA_HPKE_PUBLIC_KEY",
 		"AUDIT_PUBLIC_KEY",
 		"AUDIT_KEY_ID",
@@ -349,6 +354,55 @@ func TestLoadPrefetchYMaxRetriesInvalidos(t *testing.T) {
 
 			if _, err := Load(); err == nil {
 				t.Fatalf("esperaba error con %s=%s", caso.nombre, caso.valor)
+			}
+		})
+	}
+}
+
+func TestLoadAlertDedupHMACKeyDecodificaLos32Bytes(t *testing.T) {
+	setEnvCompleto(t)
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("no se esperaba error: %v", err)
+	}
+
+	if len(cfg.AlertDedupHMACKey) != 32 {
+		t.Fatalf("esperaba 32 bytes, obtuvo %d", len(cfg.AlertDedupHMACKey))
+	}
+	for i, b := range cfg.AlertDedupHMACKey {
+		if b != 1 {
+			t.Fatalf("byte %d = %d, esperaba 1", i, b)
+		}
+	}
+}
+
+func TestLoadAlertDedupHMACKeyInvalidaFallaSinFiltrarElValor(t *testing.T) {
+	casos := map[string]string{
+		"no es base64":            "esto no es base64 !!!",
+		"menos de 32 bytes":       "AQEBAQ==",
+		"más de 32 bytes":         claveDedupValida + "AQEB",
+		"igual a PAT_HMAC_SECRET": "clave-de-prueba",
+	}
+
+	for nombre, valor := range casos {
+		t.Run(nombre, func(t *testing.T) {
+			setEnvCompleto(t)
+			t.Setenv("ALERT_DEDUP_HMAC_KEY", valor)
+			if nombre == "igual a PAT_HMAC_SECRET" {
+				t.Setenv("PAT_HMAC_SECRET", valor)
+			}
+
+			_, err := Load()
+
+			if err == nil {
+				t.Fatal("esperaba error con ALERT_DEDUP_HMAC_KEY inválida")
+			}
+			if !strings.Contains(err.Error(), "ALERT_DEDUP_HMAC_KEY") {
+				t.Fatalf("el error debe nombrar la variable, obtuvo %q", err)
+			}
+			if strings.Contains(err.Error(), valor) {
+				t.Fatalf("el error filtra el valor de la clave: %q", err)
 			}
 		})
 	}

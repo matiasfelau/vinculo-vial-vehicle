@@ -101,9 +101,9 @@ func TestResolveOwnersPatenteConTresDuenosRetornaLosTresUUIDs(t *testing.T) {
 	owners := []uuid.UUID{uuid.New(), uuid.New(), uuid.New()}
 	repo := &fakeRepository{owners: owners}
 	decryptor := &fakePlateDecryptor{plate: []byte("AA000AA")}
-	service := NewResolveOwnersService(repo, decryptor, &fakePlateEncryptor{}, &fakePlateEncryptor{}, testAuditKeyID, []byte("secreto"), testPendingTTL)
+	service := NewResolveOwnersService(repo, decryptor, &fakePlateEncryptor{}, &fakePlateEncryptor{}, testAuditKeyID, []byte("secreto"), []byte("secreto-dedup"), testPendingTTL)
 
-	res, err := service.ResolveOwners(context.Background(), "criptograma", uuid.New())
+	res, err := service.ResolveOwners(context.Background(), "criptograma", uuid.New(), "")
 
 	if err != nil {
 		t.Fatalf("no se esperaba error: %v", err)
@@ -127,9 +127,9 @@ func TestResolveOwnersPatEncIADescifraALaPatenteCanonicaAtadaAlAlertID(t *testin
 	repo := &fakeRepository{owners: []uuid.UUID{uuid.New()}}
 	// La patente llega con minúsculas y guion: IA debe recibir la forma canónica.
 	decryptor := &fakePlateDecryptor{plate: []byte("ab-123 cd")}
-	service := NewResolveOwnersService(repo, decryptor, newRealEncryptor(t, iaPublic), &fakePlateEncryptor{}, testAuditKeyID, []byte("secreto"), testPendingTTL)
+	service := NewResolveOwnersService(repo, decryptor, newRealEncryptor(t, iaPublic), &fakePlateEncryptor{}, testAuditKeyID, []byte("secreto"), []byte("secreto-dedup"), testPendingTTL)
 
-	res, err := service.ResolveOwners(context.Background(), "criptograma", alertID)
+	res, err := service.ResolveOwners(context.Background(), "criptograma", alertID, "")
 
 	if err != nil {
 		t.Fatalf("no se esperaba error: %v", err)
@@ -158,9 +158,9 @@ func TestResolveOwnersCifraConLaClaveDeIAYNoConLaDeIdentity(t *testing.T) {
 	info := []byte(alertID.String())
 	repo := &fakeRepository{owners: []uuid.UUID{uuid.New()}}
 	decryptor := &fakePlateDecryptor{plate: []byte("AA000AA")}
-	service := NewResolveOwnersService(repo, decryptor, newRealEncryptor(t, iaPublic), &fakePlateEncryptor{}, testAuditKeyID, []byte("secreto"), testPendingTTL)
+	service := NewResolveOwnersService(repo, decryptor, newRealEncryptor(t, iaPublic), &fakePlateEncryptor{}, testAuditKeyID, []byte("secreto"), []byte("secreto-dedup"), testPendingTTL)
 
-	res, err := service.ResolveOwners(context.Background(), "criptograma", alertID)
+	res, err := service.ResolveOwners(context.Background(), "criptograma", alertID, "")
 
 	if err != nil {
 		t.Fatalf("no se esperaba error: %v", err)
@@ -178,9 +178,9 @@ func TestResolveOwnersCifraConInfoIgualAlAlertID(t *testing.T) {
 	repo := &fakeRepository{owners: []uuid.UUID{uuid.New()}}
 	decryptor := &fakePlateDecryptor{plate: []byte("AA000AA")}
 	encryptor := &fakePlateEncryptor{}
-	service := NewResolveOwnersService(repo, decryptor, encryptor, &fakePlateEncryptor{}, testAuditKeyID, []byte("secreto"), testPendingTTL)
+	service := NewResolveOwnersService(repo, decryptor, encryptor, &fakePlateEncryptor{}, testAuditKeyID, []byte("secreto"), []byte("secreto-dedup"), testPendingTTL)
 
-	if _, err := service.ResolveOwners(context.Background(), "criptograma", alertID); err != nil {
+	if _, err := service.ResolveOwners(context.Background(), "criptograma", alertID, ""); err != nil {
 		t.Fatalf("no se esperaba error: %v", err)
 	}
 
@@ -195,13 +195,13 @@ func TestResolveOwnersCadaLlamadaProduceUnCriptogramaNuevo(t *testing.T) {
 	repo := &fakeRepository{owners: []uuid.UUID{uuid.New()}}
 	encryptor := newRealEncryptor(t, iaPublic)
 
-	a, err := NewResolveOwnersService(repo, &fakePlateDecryptor{plate: []byte("AA000AA")}, encryptor, &fakePlateEncryptor{}, testAuditKeyID, []byte("secreto"), testPendingTTL).
-		ResolveOwners(context.Background(), "criptograma", alertID)
+	a, err := NewResolveOwnersService(repo, &fakePlateDecryptor{plate: []byte("AA000AA")}, encryptor, &fakePlateEncryptor{}, testAuditKeyID, []byte("secreto"), []byte("secreto-dedup"), testPendingTTL).
+		ResolveOwners(context.Background(), "criptograma", alertID, "")
 	if err != nil {
 		t.Fatalf("no se esperaba error: %v", err)
 	}
-	b, err := NewResolveOwnersService(repo, &fakePlateDecryptor{plate: []byte("AA000AA")}, encryptor, &fakePlateEncryptor{}, testAuditKeyID, []byte("secreto"), testPendingTTL).
-		ResolveOwners(context.Background(), "criptograma", alertID)
+	b, err := NewResolveOwnersService(repo, &fakePlateDecryptor{plate: []byte("AA000AA")}, encryptor, &fakePlateEncryptor{}, testAuditKeyID, []byte("secreto"), []byte("secreto-dedup"), testPendingTTL).
+		ResolveOwners(context.Background(), "criptograma", alertID, "")
 	if err != nil {
 		t.Fatalf("no se esperaba error: %v", err)
 	}
@@ -217,9 +217,9 @@ func TestResolveOwnersPatenteSinDuenosRetornaArrayVacioPatEncIAYPendingRef(t *te
 	pendingRef := uuid.New()
 	repo := &fakeRepository{owners: []uuid.UUID{}, pendingRef: &pendingRef}
 	decryptor := &fakePlateDecryptor{plate: []byte("ab-123 cd")}
-	service := NewResolveOwnersService(repo, decryptor, newRealEncryptor(t, iaPublic), &fakePlateEncryptor{}, testAuditKeyID, []byte("secreto"), testPendingTTL)
+	service := NewResolveOwnersService(repo, decryptor, newRealEncryptor(t, iaPublic), &fakePlateEncryptor{}, testAuditKeyID, []byte("secreto"), []byte("secreto-dedup"), testPendingTTL)
 
-	res, err := service.ResolveOwners(context.Background(), "criptograma", alertID)
+	res, err := service.ResolveOwners(context.Background(), "criptograma", alertID, "")
 
 	if err != nil {
 		t.Fatalf("un array vacío es un resultado válido, no un error: %v", err)
@@ -244,11 +244,11 @@ func TestResolveOwnersPatenteSinDuenosRetornaArrayVacioPatEncIAYPendingRef(t *te
 
 func TestResolveOwnersProponeUnPendingRefNuevoYElVencimientoDeLaVentana(t *testing.T) {
 	repo := &fakeRepository{}
-	service := NewResolveOwnersService(repo, &fakePlateDecryptor{plate: []byte("AA000AA")}, &fakePlateEncryptor{}, &fakePlateEncryptor{}, testAuditKeyID, []byte("secreto"), 6*time.Hour)
+	service := NewResolveOwnersService(repo, &fakePlateDecryptor{plate: []byte("AA000AA")}, &fakePlateEncryptor{}, &fakePlateEncryptor{}, testAuditKeyID, []byte("secreto"), []byte("secreto-dedup"), 6*time.Hour)
 	ahora := time.Date(2026, 10, 19, 12, 0, 0, 0, time.UTC)
 	service.now = func() time.Time { return ahora }
 
-	if _, err := service.ResolveOwners(context.Background(), "criptograma", uuid.New()); err != nil {
+	if _, err := service.ResolveOwners(context.Background(), "criptograma", uuid.New(), ""); err != nil {
 		t.Fatalf("no se esperaba error: %v", err)
 	}
 
@@ -267,9 +267,9 @@ func TestResolveOwnersCriptogramaInvalidoRetornaErrInvalidCryptogram(t *testing.
 	repo := &fakeRepository{}
 	decryptor := &fakePlateDecryptor{err: errors.New("criptograma corrupto")}
 	encryptor := &fakePlateEncryptor{}
-	service := NewResolveOwnersService(repo, decryptor, encryptor, &fakePlateEncryptor{}, testAuditKeyID, []byte("secreto"), testPendingTTL)
+	service := NewResolveOwnersService(repo, decryptor, encryptor, &fakePlateEncryptor{}, testAuditKeyID, []byte("secreto"), []byte("secreto-dedup"), testPendingTTL)
 
-	_, err := service.ResolveOwners(context.Background(), "criptograma", uuid.New())
+	_, err := service.ResolveOwners(context.Background(), "criptograma", uuid.New(), "")
 
 	if !errors.Is(err, domain.ErrInvalidCryptogram) {
 		t.Fatalf("esperaba domain.ErrInvalidCryptogram, obtuvo %v", err)
@@ -287,9 +287,9 @@ func TestResolveOwnersPatenteInvalidaRetornaErrInvalidPlateSinConsultarRepositor
 	plate := []byte("NOESVALIDA")
 	decryptor := &fakePlateDecryptor{plate: plate}
 	encryptor := &fakePlateEncryptor{}
-	service := NewResolveOwnersService(repo, decryptor, encryptor, &fakePlateEncryptor{}, testAuditKeyID, []byte("secreto"), testPendingTTL)
+	service := NewResolveOwnersService(repo, decryptor, encryptor, &fakePlateEncryptor{}, testAuditKeyID, []byte("secreto"), []byte("secreto-dedup"), testPendingTTL)
 
-	_, err := service.ResolveOwners(context.Background(), "criptograma", uuid.New())
+	_, err := service.ResolveOwners(context.Background(), "criptograma", uuid.New(), "")
 
 	if !errors.Is(err, domain.ErrInvalidPlate) {
 		t.Fatalf("esperaba domain.ErrInvalidPlate, obtuvo %v", err)
@@ -307,9 +307,9 @@ func TestResolveOwnersErrorDelRepositorioCortaAntesDeCifrar(t *testing.T) {
 	repo := &fakeRepository{ownersErr: errors.New("fallo de base de datos")}
 	decryptor := &fakePlateDecryptor{plate: []byte("AA000AA")}
 	encryptor := &fakePlateEncryptor{}
-	service := NewResolveOwnersService(repo, decryptor, encryptor, &fakePlateEncryptor{}, testAuditKeyID, []byte("secreto"), testPendingTTL)
+	service := NewResolveOwnersService(repo, decryptor, encryptor, &fakePlateEncryptor{}, testAuditKeyID, []byte("secreto"), []byte("secreto-dedup"), testPendingTTL)
 
-	res, err := service.ResolveOwners(context.Background(), "criptograma", uuid.New())
+	res, err := service.ResolveOwners(context.Background(), "criptograma", uuid.New(), "")
 
 	if err == nil {
 		t.Fatal("esperaba propagar el error del repositorio")
@@ -329,9 +329,9 @@ func TestResolveOwnersErrorDeCifradoEsInternoYSinRespuestaParcial(t *testing.T) 
 			repo := &fakeRepository{owners: owners, pendingRef: &pendingRef}
 			decryptor := &fakePlateDecryptor{plate: []byte("AA000AA")}
 			encryptor := &fakePlateEncryptor{err: errors.New("fallo de cifrado")}
-			service := NewResolveOwnersService(repo, decryptor, encryptor, &fakePlateEncryptor{}, testAuditKeyID, []byte("secreto"), testPendingTTL)
+			service := NewResolveOwnersService(repo, decryptor, encryptor, &fakePlateEncryptor{}, testAuditKeyID, []byte("secreto"), []byte("secreto-dedup"), testPendingTTL)
 
-			res, err := service.ResolveOwners(context.Background(), "criptograma", uuid.New())
+			res, err := service.ResolveOwners(context.Background(), "criptograma", uuid.New(), "")
 
 			if err == nil {
 				t.Fatal("esperaba un error ante el fallo de cifrado")
@@ -353,9 +353,9 @@ func TestResolveOwnersWipeaLaPatenteEnClaroYLaCanonicaEnExito(t *testing.T) {
 	plate := []byte("AA000AA")
 	decryptor := &fakePlateDecryptor{plate: plate}
 	encryptor := &fakePlateEncryptor{}
-	service := NewResolveOwnersService(repo, decryptor, encryptor, &fakePlateEncryptor{}, testAuditKeyID, []byte("secreto"), testPendingTTL)
+	service := NewResolveOwnersService(repo, decryptor, encryptor, &fakePlateEncryptor{}, testAuditKeyID, []byte("secreto"), []byte("secreto-dedup"), testPendingTTL)
 
-	if _, err := service.ResolveOwners(context.Background(), "criptograma", uuid.New()); err != nil {
+	if _, err := service.ResolveOwners(context.Background(), "criptograma", uuid.New(), ""); err != nil {
 		t.Fatalf("no se esperaba error: %v", err)
 	}
 
@@ -367,9 +367,9 @@ func TestResolveOwnersWipeaLaPatenteAnteErrorDelRepositorio(t *testing.T) {
 	repo := &fakeRepository{ownersErr: errors.New("fallo de base de datos")}
 	plate := []byte("AA000AA")
 	decryptor := &fakePlateDecryptor{plate: plate}
-	service := NewResolveOwnersService(repo, decryptor, &fakePlateEncryptor{}, &fakePlateEncryptor{}, testAuditKeyID, []byte("secreto"), testPendingTTL)
+	service := NewResolveOwnersService(repo, decryptor, &fakePlateEncryptor{}, &fakePlateEncryptor{}, testAuditKeyID, []byte("secreto"), []byte("secreto-dedup"), testPendingTTL)
 
-	_, _ = service.ResolveOwners(context.Background(), "criptograma", uuid.New())
+	_, _ = service.ResolveOwners(context.Background(), "criptograma", uuid.New(), "")
 
 	assertWiped(t, "la patente en claro", plate)
 }
@@ -379,9 +379,9 @@ func TestResolveOwnersWipeaLaPatenteAnteErrorDeCifrado(t *testing.T) {
 	plate := []byte("AA000AA")
 	decryptor := &fakePlateDecryptor{plate: plate}
 	encryptor := &fakePlateEncryptor{err: errors.New("fallo de cifrado")}
-	service := NewResolveOwnersService(repo, decryptor, encryptor, &fakePlateEncryptor{}, testAuditKeyID, []byte("secreto"), testPendingTTL)
+	service := NewResolveOwnersService(repo, decryptor, encryptor, &fakePlateEncryptor{}, testAuditKeyID, []byte("secreto"), []byte("secreto-dedup"), testPendingTTL)
 
-	_, _ = service.ResolveOwners(context.Background(), "criptograma", uuid.New())
+	_, _ = service.ResolveOwners(context.Background(), "criptograma", uuid.New(), "")
 
 	assertWiped(t, "la patente en claro", plate)
 	assertWiped(t, "la patente canónica", encryptor.plaintext)
@@ -392,9 +392,9 @@ func TestResolveOwnersWipeaLaPatenteSinDuenos(t *testing.T) {
 	plate := []byte("AA000AA")
 	decryptor := &fakePlateDecryptor{plate: plate}
 	encryptor := &fakePlateEncryptor{}
-	service := NewResolveOwnersService(repo, decryptor, encryptor, &fakePlateEncryptor{}, testAuditKeyID, []byte("secreto"), testPendingTTL)
+	service := NewResolveOwnersService(repo, decryptor, encryptor, &fakePlateEncryptor{}, testAuditKeyID, []byte("secreto"), []byte("secreto-dedup"), testPendingTTL)
 
-	_, _ = service.ResolveOwners(context.Background(), "criptograma", uuid.New())
+	_, _ = service.ResolveOwners(context.Background(), "criptograma", uuid.New(), "")
 
 	assertWiped(t, "la patente en claro", plate)
 	assertWiped(t, "la patente canónica", encryptor.plaintext)

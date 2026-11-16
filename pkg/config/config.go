@@ -2,6 +2,7 @@
 package config
 
 import (
+	"encoding/base64"
 	"fmt"
 	"math"
 	"os"
@@ -29,6 +30,9 @@ const maxRabbitMQPrefetch = 65535
 // audit_records.audit_key_id, que es varchar(32).
 const maxAuditKeyIDLength = 32
 
+// alertDedupKeyLength es el largo en bytes de ALERT_DEDUP_HMAC_KEY (US-16).
+const alertDedupKeyLength = 32
+
 // Config agrupa los parámetros de configuración requeridos por el servicio.
 type Config struct {
 	Port                  string
@@ -38,6 +42,11 @@ type Config struct {
 	PatAESKey             string
 	PatHMACSecret         string
 	IAHPKEPublicKey       string
+
+	// AlertDedupHMACKey es ALERT_DEDUP_HMAC_KEY (US-16), ya decodificada de base64: la
+	// clave con la que se calcula la dedup_key por emisor y patente. Es independiente
+	// de PatHMACSecret, para que la clave de Alert no sirva para buscar en la base.
+	AlertDedupHMACKey []byte
 
 	// AuditPublicKey y AuditKeyID (US-11) son la clave pública X25519 (base64) de
 	// Audit y el id corto con el que Audit identifica su par. Deben ser iguales a los
@@ -235,6 +244,11 @@ func Load() (*Config, error) {
 	if len(cfg.AuditKeyID) > maxAuditKeyIDLength {
 		return nil, fmt.Errorf("config: AUDIT_KEY_ID no puede superar %d caracteres", maxAuditKeyIDLength)
 	}
+	dedupKey, err := parseAlertDedupKey(os.Getenv("ALERT_DEDUP_HMAC_KEY"), cfg.PatHMACSecret)
+	if err != nil {
+		return nil, err
+	}
+	cfg.AlertDedupHMACKey = dedupKey
 	if cfg.RabbitMQURL == "" {
 		return nil, fmt.Errorf("config: RABBITMQ_URL es obligatoria")
 	}
@@ -243,6 +257,27 @@ func Load() (*Config, error) {
 	}
 
 	return cfg, nil
+}
+
+// parseAlertDedupKey valida ALERT_DEDUP_HMAC_KEY: obligatoria, 32 bytes en base64 y
+// distinta de PAT_HMAC_SECRET. Los mensajes de error nunca incluyen el valor.
+func parseAlertDedupKey(raw, patHMACSecret string) ([]byte, error) {
+	if raw == "" {
+		return nil, fmt.Errorf("config: ALERT_DEDUP_HMAC_KEY es obligatoria")
+	}
+
+	key, err := base64.StdEncoding.DecodeString(raw)
+	if err != nil {
+		return nil, fmt.Errorf("config: ALERT_DEDUP_HMAC_KEY no es base64 válido")
+	}
+	if len(key) != alertDedupKeyLength {
+		return nil, fmt.Errorf("config: ALERT_DEDUP_HMAC_KEY debe decodificar a %d bytes", alertDedupKeyLength)
+	}
+	if raw == patHMACSecret {
+		return nil, fmt.Errorf("config: ALERT_DEDUP_HMAC_KEY debe ser independiente de PAT_HMAC_SECRET")
+	}
+
+	return key, nil
 }
 
 // parseIntInRange lee la variable de entorno name como un entero dentro de
