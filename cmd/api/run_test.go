@@ -367,6 +367,7 @@ func TestMainSeApagaConSIGTERM(t *testing.T) {
 		"VEHICLE_HPKE_PRIVATE_KEY": cfg.VehicleHPKEPrivateKey,
 		"PAT_AES_KEY":              cfg.PatAESKey,
 		"PAT_HMAC_SECRET":          cfg.PatHMACSecret,
+		"ALERT_DEDUP_HMAC_KEY":     base64.StdEncoding.EncodeToString(bytes.Repeat([]byte{9}, 32)),
 		"IA_HPKE_PUBLIC_KEY":       cfg.IAHPKEPublicKey,
 		"AUDIT_PUBLIC_KEY":         cfg.AuditPublicKey,
 		"AUDIT_KEY_ID":             cfg.AuditKeyID,
