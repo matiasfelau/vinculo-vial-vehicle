@@ -146,7 +146,7 @@ func run(ctx context.Context, cfg *config.Config) error {
 
 	vehicleService := vehicle.NewService(repository, payloadDecryptor, plateCipher, []byte(cfg.PatHMACSecret), cfg.VehicleMaxPerUser)
 
-	resolveOwnersService := lookup.NewResolveOwnersService(repository, payloadDecryptor, outboundEncryptors.plate, outboundEncryptors.audit, cfg.AuditKeyID, []byte(cfg.PatHMACSecret), cfg.PendingDeliveryTTL)
+	resolveOwnersService := lookup.NewResolveOwnersService(repository, payloadDecryptor, outboundEncryptors.plate, outboundEncryptors.audit, cfg.AuditKeyID, []byte(cfg.PatHMACSecret), cfg.AlertDedupHMACKey, cfg.PendingDeliveryTTL)
 
 	userDeletedService := userdeleted.NewRemoveVehiclesService(repository)
 	userDeletedStatus := &events.ConnectionStatus{}

@@ -10,10 +10,15 @@ import "github.com/google/uuid"
 // PatEncAudit es la patente canónica sellada hacia Audit (base64 de enc‖ct) y
 // AuditKeyID identifica la clave pública con la que se selló, para que Audit
 // sepa qué clave privada abre el registro tras una rotación.
+//
+// DedupKey (US-16) solo se completa cuando el llamador pasó issuer_id: es el HMAC
+// por emisor y patente con el que Alert aplica el cupo de una alerta cada 24 h
+// sin conocer la patente. Va igual con dueños que sin ellos.
 type OwnerResolution struct {
 	OwnerIDs    []uuid.UUID
 	PatEncIA    string
 	PatEncAudit string
 	AuditKeyID  string
 	PendingRef  *uuid.UUID
+	DedupKey    string
 }
