@@ -23,7 +23,7 @@ func crearVehiculo(t *testing.T, repo *VehicleRepository, ownerID uuid.UUID, pat
 	t.Helper()
 
 	vehicle := &domain.Vehicle{ID: uuid.New(), OwnerID: ownerID, PatHashed: patHashed, PatAES: "cifrado", CreatedAt: time.Now()}
-	if err := repo.Create(context.Background(), vehicle); err != nil {
+	if err := crear(repo, vehicle); err != nil {
 		t.Fatalf("no se pudo crear el vehículo: %v", err)
 	}
 }

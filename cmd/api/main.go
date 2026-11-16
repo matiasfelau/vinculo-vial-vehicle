@@ -10,9 +10,6 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/matiasfelau/vinculo-vial-vehicle/internal/breaker"
-	"github.com/matiasfelau/vinculo-vial-vehicle/internal/client/dnrpa"
-	"github.com/matiasfelau/vinculo-vial-vehicle/internal/client/identity"
 	"github.com/matiasfelau/vinculo-vial-vehicle/internal/crypto/hpke"
 	"github.com/matiasfelau/vinculo-vial-vehicle/internal/crypto/symmetric"
 	"github.com/matiasfelau/vinculo-vial-vehicle/internal/delivery/events"
@@ -60,8 +57,6 @@ func awaitDone(ctx context.Context, done <-chan struct{}, onTimeout string) {
 // clave pública de su destinatario. Son instancias independientes: cruzar una
 // clave enviaría el dato a quien no corresponde.
 type encryptors struct {
-	// dni cifra el DNI hacia Identity (IDENTITY_HPKE_PUBLIC_KEY).
-	dni *hpke.Encryptor
 	// plate cifra la patente hacia IA (IA_HPKE_PUBLIC_KEY).
 	plate *hpke.Encryptor
 	// audit cifra la patente hacia Audit (AUDIT_PUBLIC_KEY).
@@ -71,11 +66,6 @@ type encryptors struct {
 // newEncryptors construye los cifradores HPKE de salida. Una clave inválida, por
 // ejemplo una que no decodifica a 32 bytes, hace fallar el arranque.
 func newEncryptors(cfg *config.Config) (encryptors, error) {
-	dni, err := hpke.NewEncryptor(cfg.IdentityHPKEPublicKey)
-	if err != nil {
-		return encryptors{}, fmt.Errorf("cifrador hacia identity: %w", err)
-	}
-
 	plate, err := hpke.NewEncryptor(cfg.IAHPKEPublicKey)
 	if err != nil {
 		return encryptors{}, fmt.Errorf("cifrador hacia ia: %w", err)
@@ -86,7 +76,7 @@ func newEncryptors(cfg *config.Config) (encryptors, error) {
 		return encryptors{}, fmt.Errorf("cifrador hacia audit: %w", err)
 	}
 
-	return encryptors{dni: dni, plate: plate, audit: audit}, nil
+	return encryptors{plate: plate, audit: audit}, nil
 }
 
 func main() {
@@ -109,8 +99,6 @@ func main() {
 	if err != nil {
 		log.Fatalf("no se pudo inicializar el cifrado at-rest: %v", err)
 	}
-
-	dnrpaClient := dnrpa.NewMockDNRPAAdapter([]byte(cfg.MockDNRPAOwnerDNI))
 
 	db, err := postgres.Connect(cfg.DatabaseURL)
 	if err != nil {
@@ -141,26 +129,14 @@ func main() {
 	// depende de la disponibilidad del broker.
 	outboxWorker := outbox.NewWorker(outboxRepository, events.NewPublisher(rabbitConn, cfg.RabbitMQExchange, cfg.RabbitMQPublishTimeout), cfg.OutboxWorkerBatchSize)
 
-	identityClient := identity.NewClient(cfg.IdentityInternalURL, cfg.InternalServiceToken, time.Duration(cfg.IdentityTimeoutMS)*time.Millisecond)
-	identityCircuitBreaker := breaker.New(cfg.IdentityCBFailureThreshold, cfg.IdentityCBWindow, cfg.IdentityCBOpenDuration)
-	identityVerifier := identity.NewBreakerVerifier(identityClient, identityCircuitBreaker)
+	vehicleService := vehicle.NewService(repository, payloadDecryptor, plateCipher, []byte(cfg.PatHMACSecret), cfg.VehicleMaxPerUser)
 
-	registerVehicleService := vehicle.NewRegisterVehicleService(
-		repository,
-		identityVerifier,
-		dnrpaClient,
-		payloadDecryptor,
-		outboundEncryptors.dni,
-		plateCipher,
-		[]byte(cfg.PatHMACSecret),
-	)
-
-	resolveOwnersService := lookup.NewResolveOwnersService(repository, payloadDecryptor, outboundEncryptors.plate, outboundEncryptors.audit, cfg.AuditKeyID, []byte(cfg.PatHMACSecret), cfg.PendingDeliveryTTL)
+	resolveOwnersService := lookup.NewResolveOwnersService(repository, payloadDecryptor, outboundEncryptors.plate, outboundEncryptors.audit, cfg.AuditKeyID, []byte(cfg.PatHMACSecret), cfg.AlertDedupHMACKey, cfg.PendingDeliveryTTL)
 
 	userDeletedService := userdeleted.NewRemoveVehiclesService(repository)
 	userDeletedStatus := &events.ConnectionStatus{}
 
-	router := httpdelivery.NewRouter(registerVehicleService, repository, identityVerifier,
+	router := httpdelivery.NewRouter(vehicleService, repository,
 		httpdelivery.DependencyCheck{Name: "user_deleted_consumer", Healthy: userDeletedStatus.Connected},
 	)
 	internalRouter := httpdelivery.NewInternalRouter(cfg.InternalServiceToken, resolveOwnersService)

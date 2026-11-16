@@ -1,7 +1,6 @@
 package postgres
 
 import (
-	"context"
 	"testing"
 	"time"
 
@@ -21,7 +20,7 @@ func TestResetSchemaEliminaTablasYDatosExistentes(t *testing.T) {
 		PatAES:    "cifrado-de-prueba",
 		CreatedAt: time.Now(),
 	}
-	if err := repo.Create(context.Background(), vehicle); err != nil {
+	if err := crear(repo, vehicle); err != nil {
 		t.Fatalf("no se pudo crear el vehículo de prueba: %v", err)
 	}
 

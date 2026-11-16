@@ -62,7 +62,7 @@ func TestCreatePersisteVehiculo(t *testing.T) {
 		CreatedAt: time.Now(),
 	}
 
-	if err := repo.Create(context.Background(), vehicle); err != nil {
+	if err := crear(repo, vehicle); err != nil {
 		t.Fatalf("no se pudo crear el vehículo: %v", err)
 	}
 }
@@ -75,12 +75,12 @@ func TestCreateMismoPropietarioMismaPatenteRetornaDuplicado(t *testing.T) {
 	patHashed := uuid.NewString()
 
 	primero := &domain.Vehicle{ID: uuid.New(), OwnerID: ownerID, PatHashed: patHashed, PatAES: "cifrado-1", CreatedAt: time.Now()}
-	if err := repo.Create(context.Background(), primero); err != nil {
+	if err := crear(repo, primero); err != nil {
 		t.Fatalf("no se pudo crear el primer vehículo: %v", err)
 	}
 
 	segundo := &domain.Vehicle{ID: uuid.New(), OwnerID: ownerID, PatHashed: patHashed, PatAES: "cifrado-2", CreatedAt: time.Now()}
-	err := repo.Create(context.Background(), segundo)
+	err := crear(repo, segundo)
 	if !errors.Is(err, domain.ErrDuplicateVehicle) {
 		t.Fatalf("esperaba domain.ErrDuplicateVehicle, obtuvo %v", err)
 	}
@@ -93,12 +93,22 @@ func TestCreateDistintoPropietarioMismaPatenteSePermite(t *testing.T) {
 	patHashed := uuid.NewString()
 
 	primero := &domain.Vehicle{ID: uuid.New(), OwnerID: uuid.New(), PatHashed: patHashed, PatAES: "cifrado-1", CreatedAt: time.Now()}
-	if err := repo.Create(context.Background(), primero); err != nil {
+	if err := crear(repo, primero); err != nil {
 		t.Fatalf("no se pudo crear el primer vehículo: %v", err)
 	}
 
 	segundo := &domain.Vehicle{ID: uuid.New(), OwnerID: uuid.New(), PatHashed: patHashed, PatAES: "cifrado-2", CreatedAt: time.Now()}
-	if err := repo.Create(context.Background(), segundo); err != nil {
+	if err := crear(repo, segundo); err != nil {
 		t.Fatalf("esperaba poder vincular la misma patente a otro propietario, obtuvo error: %v", err)
 	}
+}
+
+// testMaxPerOwner es el tope de las pruebas que no ejercitan el tope: lo bastante
+// alto para que no interfiera cuando cargan varios vehículos de un mismo titular.
+const testMaxPerOwner = 100
+
+// crear vincula el vehículo con el tope de las pruebas y descarta el conteo.
+func crear(repo *VehicleRepository, vehicle *domain.Vehicle) error {
+	_, err := repo.Create(context.Background(), vehicle, testMaxPerOwner)
+	return err
 }

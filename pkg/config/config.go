@@ -2,6 +2,7 @@
 package config
 
 import (
+	"encoding/base64"
 	"fmt"
 	"math"
 	"os"
@@ -29,6 +30,9 @@ const maxRabbitMQPrefetch = 65535
 // audit_records.audit_key_id, que es varchar(32).
 const maxAuditKeyIDLength = 32
 
+// alertDedupKeyLength es el largo en bytes de ALERT_DEDUP_HMAC_KEY (US-16).
+const alertDedupKeyLength = 32
+
 // Config agrupa los parámetros de configuración requeridos por el servicio.
 type Config struct {
 	Port                  string
@@ -37,11 +41,12 @@ type Config struct {
 	VehicleHPKEPrivateKey string
 	PatAESKey             string
 	PatHMACSecret         string
-	IdentityInternalURL   string
-	IdentityTimeoutMS     int
-	IdentityHPKEPublicKey string
 	IAHPKEPublicKey       string
-	MockDNRPAOwnerDNI     string
+
+	// AlertDedupHMACKey es ALERT_DEDUP_HMAC_KEY (US-16), ya decodificada de base64: la
+	// clave con la que se calcula la dedup_key por emisor y patente. Es independiente
+	// de PatHMACSecret, para que la clave de Alert no sirva para buscar en la base.
+	AlertDedupHMACKey []byte
 
 	// AuditPublicKey y AuditKeyID (US-11) son la clave pública X25519 (base64) de
 	// Audit y el id corto con el que Audit identifica su par. Deben ser iguales a los
@@ -52,10 +57,9 @@ type Config struct {
 	InternalServiceToken string
 	EphemeralDB          bool
 
-	// Parámetros del circuit breaker hacia identity (ver internal/breaker).
-	IdentityCBFailureThreshold int
-	IdentityCBWindow           time.Duration
-	IdentityCBOpenDuration     time.Duration
+	// VehicleMaxPerUser es VEHICLE_MAX_PER_USER (US-14): cuántos vehículos puede
+	// tener vinculados un usuario. Por defecto 3.
+	VehicleMaxPerUser int
 
 	// DBQueryTimeout acota cada consulta contra la base de datos propia (ver
 	// internal/repository/postgres.WithQueryTimeout).
@@ -105,10 +109,7 @@ func Load() (*Config, error) {
 		VehicleHPKEPrivateKey: os.Getenv("VEHICLE_HPKE_PRIVATE_KEY"),
 		PatAESKey:             os.Getenv("PAT_AES_KEY"),
 		PatHMACSecret:         os.Getenv("PAT_HMAC_SECRET"),
-		IdentityInternalURL:   os.Getenv("IDENTITY_INTERNAL_URL"),
-		IdentityHPKEPublicKey: os.Getenv("IDENTITY_HPKE_PUBLIC_KEY"),
 		IAHPKEPublicKey:       os.Getenv("IA_HPKE_PUBLIC_KEY"),
-		MockDNRPAOwnerDNI:     os.Getenv("MOCK_DNRPA_OWNER_DNI"),
 		AuditPublicKey:        os.Getenv("AUDIT_PUBLIC_KEY"),
 		AuditKeyID:            os.Getenv("AUDIT_KEY_ID"),
 		InternalServiceToken:  os.Getenv("INTERNAL_SERVICE_TOKEN"),
@@ -128,16 +129,6 @@ func Load() (*Config, error) {
 		return nil, fmt.Errorf("config: INTERNAL_PORT no puede coincidir con PORT: el router interno perdería su puerto propio")
 	}
 
-	timeoutRaw := os.Getenv("IDENTITY_TIMEOUT_MS")
-	if timeoutRaw == "" {
-		timeoutRaw = "2000"
-	}
-	timeoutMS, err := strconv.Atoi(timeoutRaw)
-	if err != nil {
-		return nil, fmt.Errorf("config: IDENTITY_TIMEOUT_MS inválido: %w", err)
-	}
-	cfg.IdentityTimeoutMS = timeoutMS
-
 	ephemeralDBRaw := os.Getenv("EPHEMERAL_DB")
 	if ephemeralDBRaw == "" {
 		ephemeralDBRaw = "false"
@@ -147,28 +138,6 @@ func Load() (*Config, error) {
 		return nil, fmt.Errorf("config: EPHEMERAL_DB inválido: %w", err)
 	}
 	cfg.EphemeralDB = ephemeralDB
-
-	cbThresholdRaw := os.Getenv("IDENTITY_CB_FAILURE_THRESHOLD")
-	if cbThresholdRaw == "" {
-		cbThresholdRaw = "5"
-	}
-	cbThreshold, err := strconv.Atoi(cbThresholdRaw)
-	if err != nil {
-		return nil, fmt.Errorf("config: IDENTITY_CB_FAILURE_THRESHOLD inválido: %w", err)
-	}
-	cfg.IdentityCBFailureThreshold = cbThreshold
-
-	cbWindowMS, err := parsePositiveMillis("IDENTITY_CB_WINDOW_MS", "30000")
-	if err != nil {
-		return nil, err
-	}
-	cfg.IdentityCBWindow = cbWindowMS
-
-	cbOpenDurationMS, err := parsePositiveMillis("IDENTITY_CB_OPEN_DURATION_MS", "30000")
-	if err != nil {
-		return nil, err
-	}
-	cfg.IdentityCBOpenDuration = cbOpenDurationMS
 
 	// El default debe mantenerse por debajo del timeout servicio-a-servicio con el
 	// que vinculo-vial-alert llama a este servicio (2000ms): si la consulta a la
@@ -239,6 +208,12 @@ func Load() (*Config, error) {
 	}
 	cfg.RabbitMQPrefetch = int(prefetch)
 
+	maxVehicles, err := parseIntInRange("VEHICLE_MAX_PER_USER", "3", 1, math.MaxInt32)
+	if err != nil {
+		return nil, err
+	}
+	cfg.VehicleMaxPerUser = int(maxVehicles)
+
 	maxRetries, err := parseIntInRange("MAX_RETRIES", "5", 0, math.MaxInt32)
 	if err != nil {
 		return nil, err
@@ -248,9 +223,6 @@ func Load() (*Config, error) {
 	if cfg.DatabaseURL == "" {
 		return nil, fmt.Errorf("config: DATABASE_URL es obligatoria")
 	}
-	if cfg.IdentityInternalURL == "" {
-		return nil, fmt.Errorf("config: IDENTITY_INTERNAL_URL es obligatoria")
-	}
 	if cfg.VehicleHPKEPrivateKey == "" {
 		return nil, fmt.Errorf("config: VEHICLE_HPKE_PRIVATE_KEY es obligatoria")
 	}
@@ -259,9 +231,6 @@ func Load() (*Config, error) {
 	}
 	if cfg.PatHMACSecret == "" {
 		return nil, fmt.Errorf("config: PAT_HMAC_SECRET es obligatoria")
-	}
-	if cfg.IdentityHPKEPublicKey == "" {
-		return nil, fmt.Errorf("config: IDENTITY_HPKE_PUBLIC_KEY es obligatoria")
 	}
 	if cfg.IAHPKEPublicKey == "" {
 		return nil, fmt.Errorf("config: IA_HPKE_PUBLIC_KEY es obligatoria")
@@ -275,17 +244,40 @@ func Load() (*Config, error) {
 	if len(cfg.AuditKeyID) > maxAuditKeyIDLength {
 		return nil, fmt.Errorf("config: AUDIT_KEY_ID no puede superar %d caracteres", maxAuditKeyIDLength)
 	}
+	dedupKey, err := parseAlertDedupKey(os.Getenv("ALERT_DEDUP_HMAC_KEY"), cfg.PatHMACSecret)
+	if err != nil {
+		return nil, err
+	}
+	cfg.AlertDedupHMACKey = dedupKey
 	if cfg.RabbitMQURL == "" {
 		return nil, fmt.Errorf("config: RABBITMQ_URL es obligatoria")
-	}
-	if cfg.MockDNRPAOwnerDNI == "" {
-		return nil, fmt.Errorf("config: MOCK_DNRPA_OWNER_DNI es obligatoria")
 	}
 	if cfg.InternalServiceToken == "" {
 		return nil, fmt.Errorf("config: INTERNAL_SERVICE_TOKEN es obligatoria")
 	}
 
 	return cfg, nil
+}
+
+// parseAlertDedupKey valida ALERT_DEDUP_HMAC_KEY: obligatoria, 32 bytes en base64 y
+// distinta de PAT_HMAC_SECRET. Los mensajes de error nunca incluyen el valor.
+func parseAlertDedupKey(raw, patHMACSecret string) ([]byte, error) {
+	if raw == "" {
+		return nil, fmt.Errorf("config: ALERT_DEDUP_HMAC_KEY es obligatoria")
+	}
+
+	key, err := base64.StdEncoding.DecodeString(raw)
+	if err != nil {
+		return nil, fmt.Errorf("config: ALERT_DEDUP_HMAC_KEY no es base64 válido")
+	}
+	if len(key) != alertDedupKeyLength {
+		return nil, fmt.Errorf("config: ALERT_DEDUP_HMAC_KEY debe decodificar a %d bytes", alertDedupKeyLength)
+	}
+	if raw == patHMACSecret {
+		return nil, fmt.Errorf("config: ALERT_DEDUP_HMAC_KEY debe ser independiente de PAT_HMAC_SECRET")
+	}
+
+	return key, nil
 }
 
 // parseIntInRange lee la variable de entorno name como un entero dentro de

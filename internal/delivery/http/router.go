@@ -14,17 +14,19 @@ type Pingable interface {
 }
 
 // NewRouter construye el motor Gin con las rutas del servicio registradas. extra
-// suma las dependencias que /health/deps reporta además del circuito hacia
-// identity (los consumidores de RabbitMQ).
-func NewRouter(registrar registerVehicleUseCase, db Pingable, identity circuitStateReporter, extra ...DependencyCheck) *gin.Engine {
+// suma las dependencias que /health/deps reporta (los consumidores de RabbitMQ).
+func NewRouter(vehicles vehicleUseCase, db Pingable, extra ...DependencyCheck) *gin.Engine {
 	engine := gin.New()
 	engine.Use(gin.Logger())
 	engine.Use(gin.Recovery())
 
 	engine.GET("/health", healthCheck)
 	engine.GET("/ready", readyCheck(db))
-	engine.GET("/health/deps", DepsHealthHandler(identity, extra...))
-	engine.POST("/api/v1/vehicles", RegisterVehicleHandler(registrar))
+	engine.GET("/health/deps", DepsHealthHandler(extra...))
+	engine.POST("/api/v1/vehicles", RegisterVehicleHandler(vehicles))
+	engine.GET("/api/v1/vehicles", CountVehiclesHandler(vehicles))
+	engine.POST("/api/v1/vehicles/unlink", UnlinkVehicleHandler(vehicles))
+	engine.DELETE("/api/v1/vehicles", UnlinkAllVehiclesHandler(vehicles))
 
 	return engine
 }

@@ -47,19 +47,19 @@ func openWithInfo(privateKey kem.PrivateKey, ciphertext, info []byte) ([]byte, e
 	return opener.Open(sealed, nil)
 }
 
-// El cifrador de la patente debe usar la clave de IA, el de Audit la de Audit y el
-// del DNI la de Identity: cruzarlas enviaría el dato a quien no corresponde.
+// El cifrador de la patente debe usar la clave de IA y el de Audit la de Audit:
+// cruzarlas enviaría el dato a quien no corresponde.
 func TestNewEncryptorsCadaCifradorUsaLaClaveDeSuDestinatario(t *testing.T) {
-	identityPublic, identityPrivate := newKeyPair(t)
+	_, terceroPrivate := newKeyPair(t)
 	iaPublic, iaPrivate := newKeyPair(t)
 	auditPublic, auditPrivate := newKeyPair(t)
-	cfg := &config.Config{IdentityHPKEPublicKey: identityPublic, IAHPKEPublicKey: iaPublic, AuditPublicKey: auditPublic}
+	cfg := &config.Config{IAHPKEPublicKey: iaPublic, AuditPublicKey: auditPublic}
 
 	enc, err := newEncryptors(cfg)
 	if err != nil {
 		t.Fatalf("no se esperaba error: %v", err)
 	}
-	dni, plate := enc.dni, enc.plate
+	plate := enc.plate
 
 	auditInfo := []byte("vv-audit:pat:3f2b8c1e-0000-4000-8000-000000000001")
 	sealedAudit, err := enc.audit.EncryptWithInfo([]byte("AB123CD"), auditInfo)
@@ -69,7 +69,7 @@ func TestNewEncryptorsCadaCifradorUsaLaClaveDeSuDestinatario(t *testing.T) {
 	if _, err := openWithInfo(auditPrivate, sealedAudit, auditInfo); err != nil {
 		t.Fatalf("la patente debía descifrarse con la clave de Audit: %v", err)
 	}
-	for nombre, private := range map[string]kem.PrivateKey{"IA": iaPrivate, "Identity": identityPrivate} {
+	for nombre, private := range map[string]kem.PrivateKey{"IA": iaPrivate, "un tercero": terceroPrivate} {
 		if _, err := openWithInfo(private, sealedAudit, auditInfo); err == nil {
 			t.Fatalf("la patente sellada hacia Audit no debía descifrarse con la clave de %s", nombre)
 		}
@@ -83,22 +83,11 @@ func TestNewEncryptorsCadaCifradorUsaLaClaveDeSuDestinatario(t *testing.T) {
 	if _, err := openWithInfo(iaPrivate, sealedPlate, info); err != nil {
 		t.Fatalf("la patente debía descifrarse con la clave de IA: %v", err)
 	}
-	if _, err := openWithInfo(identityPrivate, sealedPlate, info); err == nil {
-		t.Fatal("la patente no debía descifrarse con la clave de Identity")
+	if _, err := openWithInfo(terceroPrivate, sealedPlate, info); err == nil {
+		t.Fatal("la patente no debía descifrarse con la clave de un tercero")
 	}
 	if _, err := openWithInfo(auditPrivate, sealedPlate, info); err == nil {
 		t.Fatal("la patente sellada hacia IA no debía descifrarse con la clave de Audit")
-	}
-
-	sealedDNI, err := dni.Encrypt([]byte("30123456"))
-	if err != nil {
-		t.Fatalf("no se pudo cifrar el DNI: %v", err)
-	}
-	if _, err := openWithInfo(identityPrivate, sealedDNI, nil); err != nil {
-		t.Fatalf("el DNI debía descifrarse con la clave de Identity: %v", err)
-	}
-	if _, err := openWithInfo(iaPrivate, sealedDNI, nil); err == nil {
-		t.Fatal("el DNI no debía descifrarse con la clave de IA")
 	}
 }
 
@@ -109,12 +98,11 @@ func TestNewEncryptorsFallaConClaveInvalida(t *testing.T) {
 	largaDeUnByte := base64.StdEncoding.EncodeToString(make([]byte, 33))
 
 	casos := map[string]*config.Config{
-		"ia invalida":        {IdentityHPKEPublicKey: valid, IAHPKEPublicKey: "no-es-una-clave", AuditPublicKey: valid},
-		"identity invalida":  {IdentityHPKEPublicKey: "no-es-una-clave", IAHPKEPublicKey: valid, AuditPublicKey: valid},
-		"audit no es base64": {IdentityHPKEPublicKey: valid, IAHPKEPublicKey: valid, AuditPublicKey: "no-es-una-clave"},
-		"audit de 31 bytes":  {IdentityHPKEPublicKey: valid, IAHPKEPublicKey: valid, AuditPublicKey: cortaDeUnByte},
-		"audit de 33 bytes":  {IdentityHPKEPublicKey: valid, IAHPKEPublicKey: valid, AuditPublicKey: largaDeUnByte},
-		"audit vacia":        {IdentityHPKEPublicKey: valid, IAHPKEPublicKey: valid, AuditPublicKey: ""},
+		"ia invalida":        {IAHPKEPublicKey: "no-es-una-clave", AuditPublicKey: valid},
+		"audit no es base64": {IAHPKEPublicKey: valid, AuditPublicKey: "no-es-una-clave"},
+		"audit de 31 bytes":  {IAHPKEPublicKey: valid, AuditPublicKey: cortaDeUnByte},
+		"audit de 33 bytes":  {IAHPKEPublicKey: valid, AuditPublicKey: largaDeUnByte},
+		"audit vacia":        {IAHPKEPublicKey: valid, AuditPublicKey: ""},
 	}
 
 	for nombre, cfg := range casos {
