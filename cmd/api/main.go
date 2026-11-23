@@ -85,33 +85,48 @@ func main() {
 		log.Fatalf("no se pudo cargar la configuración: %v", err)
 	}
 
+	// El apagado ordenado se dispara ante SIGINT o SIGTERM (la señal que envía
+	// un orquestador de contenedores al detener el servicio): las peticiones en
+	// vuelo terminan de atenderse antes de cerrar el proceso.
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
+	if err := run(ctx, cfg); err != nil {
+		log.Fatal(err)
+	}
+}
+
+// run arma las dependencias del servicio, levanta los servidores y los procesos de
+// fondo, y bloquea hasta que ctx se cancele; entonces apaga todo en orden. Retorna
+// error si falla el arranque o si un servidor HTTP no puede iniciar.
+func run(ctx context.Context, cfg *config.Config) error {
 	payloadDecryptor, err := hpke.NewDecryptor(cfg.VehicleHPKEPrivateKey)
 	if err != nil {
-		log.Fatalf("no se pudo inicializar el desencriptador HPKE: %v", err)
+		return fmt.Errorf("no se pudo inicializar el desencriptador HPKE: %w", err)
 	}
 
 	outboundEncryptors, err := newEncryptors(cfg)
 	if err != nil {
-		log.Fatalf("no se pudieron inicializar los cifradores HPKE: %v", err)
+		return fmt.Errorf("no se pudieron inicializar los cifradores HPKE: %w", err)
 	}
 
 	plateCipher, err := symmetric.NewCipher(cfg.PatAESKey)
 	if err != nil {
-		log.Fatalf("no se pudo inicializar el cifrado at-rest: %v", err)
+		return fmt.Errorf("no se pudo inicializar el cifrado at-rest: %w", err)
 	}
 
 	db, err := postgres.Connect(cfg.DatabaseURL)
 	if err != nil {
-		log.Fatalf("no se pudo conectar a la base de datos: %v", err)
+		return fmt.Errorf("no se pudo conectar a la base de datos: %w", err)
 	}
 	if cfg.EphemeralDB {
 		log.Println("EPHEMERAL_DB=true: reiniciando el esquema para un despliegue efímero")
 		if err := postgres.ResetSchema(db); err != nil {
-			log.Fatalf("no se pudo reiniciar el esquema efímero: %v", err)
+			return fmt.Errorf("no se pudo reiniciar el esquema efímero: %w", err)
 		}
 	}
 	if err := postgres.AutoMigrate(db); err != nil {
-		log.Fatalf("no se pudo migrar el esquema: %v", err)
+		return fmt.Errorf("no se pudo migrar el esquema: %w", err)
 	}
 	repository := postgres.NewVehicleRepository(db, postgres.WithQueryTimeout(cfg.DBQueryTimeout))
 	outboxRepository := postgres.NewOutboxRepository(db, cfg.DBQueryTimeout)
@@ -121,7 +136,7 @@ func main() {
 	// degradado y reconecta en background; los eventos esperan en el outbox.
 	rabbitConn, err := events.Connect(cfg.RabbitMQURL, cfg.RabbitMQExchange)
 	if err != nil {
-		log.Fatalf("no se pudo conectar con RabbitMQ: %v", err)
+		return fmt.Errorf("no se pudo conectar con RabbitMQ: %w", err)
 	}
 	defer rabbitConn.Close()
 
@@ -161,10 +176,9 @@ func main() {
 	log.Printf("vehicle service (público) escuchando en el puerto %s", cfg.Port)
 	log.Printf("Servidor interno iniciado en puerto %s", cfg.InternalPort)
 
-	// El apagado ordenado se dispara ante SIGINT o SIGTERM (la señal que envía
-	// un orquestador de contenedores al detener el servicio): las peticiones en
-	// vuelo terminan de atenderse antes de cerrar el proceso.
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	// El sweeper y el consumidor corren hasta que ctx se cancele (la señal de
+	// apagado en producción). stop los frena también si un servidor HTTP falla.
+	ctx, stop := context.WithCancel(ctx)
 	defer stop()
 
 	workerCtx, stopWorker := context.WithCancel(context.Background())
@@ -198,7 +212,7 @@ func main() {
 	}()
 
 	if err := lifecycle.RunUntilSignal(ctx, []lifecycle.Server{publicServer, internalServer}, shutdownTimeout); err != nil {
-		log.Fatalf("error al iniciar el servidor HTTP: %v", err)
+		return fmt.Errorf("error al iniciar el servidor HTTP: %w", err)
 	}
 
 	stop()
@@ -212,4 +226,5 @@ func main() {
 	defer cancelBackground()
 	awaitDone(background, workerDone, "el worker de outbox no terminó a tiempo; los eventos pendientes se reintentan al reiniciar")
 	awaitDone(background, consumerDone, "el consumidor de user.deleted no terminó a tiempo; el mensaje en vuelo se reentrega al reiniciar")
+	return nil
 }

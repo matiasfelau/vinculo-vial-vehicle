@@ -17,6 +17,9 @@ FROM scratch
 COPY --from=builder /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-certificates.crt
 COPY --from=builder /build/vehicle /vehicle
 
+# Usuario sin privilegios (UID numérico: la imagen scratch no tiene /etc/passwd)
+USER 65532:65532
+
 EXPOSE 8080
 
 ENTRYPOINT ["/vehicle"]
